@@ -70,7 +70,7 @@ int main(int argc, char**argv) {
             }
             tam_buffer = argv[2]; //tamanho do buffer
             byte_count = 0; //inicia contagem de bytes enviados
-            while(fread(buffer, tam_buffer, 1, arquivo)) {
+            while(fread(buffer, 1, tam_buffer, arquivo)) {
                  n = send(conn, buffer, strlen(buffer),0);
                  byte_count += n;
             }
