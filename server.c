@@ -9,12 +9,38 @@
 #include <errno.h>
 #include <stdlib.h>
 
+struct windowPos {
+    int seqNumber;
+    int used;
+    int AckRcvd;
+    char *buffer;
+};
+
+void windowInit(int *windowIn, int *windowOut) {
+    *windowIn = *windowOut = 0;
+}
+
+int windowFull(int tam_janela, int *windowIn, int *windowOut) {
+    if (*windowIn == ((windowOut - 1 + tam_janela)%tam_janela))
+        return = 1; //janela cheia
+    else return 0;
+}
+
+void windowInsert (struct windowPos* window, struct windowPos newBuffer, int tam_janela, int *windowIn, int *windowOut) {
+    window[windowIn].seqNumber = newBuffer.seqNumber;
+    window[used] = 0;
+}
+
+
 int main(int argc, char**argv) {
-    int s, ret, len, n, conn, tam_buffer, byte_count;
+    int s, ret, len, n, conn, tam_buffer, byte_count, tam_janela;
     struct sockaddr_in6 cliaddr;
     struct addrinfo hints, *res;
     struct timeval tv0, tv1;
-    char received[256], buffer[256];
+    char received[256];
+    char *buffer;
+    int windowIn, windowOut;
+    struct windowPos *window;
     FILE *arquivo;
     pid_t child;
 
@@ -22,6 +48,11 @@ int main(int argc, char**argv) {
         printf("Argumentos necessarios: porto_servidor, tam_buffer, tam_janela.\n");
         exit(1);
     }
+
+    tam_buffer = argv[2]; //tamanho do buffer
+    buffer = (char*)malloc(tam_buffer*sizeof(char)); //aloca o buffer
+    tam_janela = argv[3]; //tamanho da janela
+    window = (struct windowPos*)malloc(tam_janela*sizeof(struct windowPos)); //aloca janela
 
     //criação do socket UDP
 
@@ -36,27 +67,16 @@ int main(int argc, char**argv) {
         exit(1);
     }
 
-    s=socket(res->ai_family,SOCK_STREAM,0);
+    s=socket(res->ai_family,SOCK_DGRAM,0);
     puts("socket criado.\n");
 
     bind(s,res->ai_addr,res->ai_addrlen);
     puts("bind\n");
 
-    //aguarda conexão em abertura passiva
-    if (listen(s,10) == -1) {
-        printf("\nErro ao aguardar conexão: %s", strerror(errno));
-        exit(1);
-    }
 
     while (1) {
         len=sizeof(cliaddr);
-        conn = accept(s,(struct sockaddr *)&cliaddr,&len);
 
-        if(conn == -1) {
-            perror("Erro ao aceitar conexão.\n");
-            exit(1);
-        }
-        puts("Conectado ao cliente.\n");
 
         if ((child = fork())==0) { //caso seja processo filho
             close(s);
@@ -68,7 +88,6 @@ int main(int argc, char**argv) {
                 printf("Erro ao abrir o arquivo.");
                 exit(1);
             }
-            tam_buffer = argv[2]; //tamanho do buffer
             byte_count = 0; //inicia contagem de bytes enviados
             while(fread(buffer, 1, tam_buffer, arquivo)) {
                  n = send(conn, buffer, strlen(buffer),0);
