@@ -33,7 +33,7 @@ void windowInsert (struct windowPos* window, struct windowPos newBuffer, int tam
 
 
 int main(int argc, char**argv) {
-    int s, ret, len, n, conn, tam_buffer, byte_count, tam_janela;
+    int s, ret, len, n, tam_buffer, byte_count, tam_janela;
     struct sockaddr_in6 cliaddr;
     struct addrinfo hints, *res;
     struct timeval tv0, tv1;
@@ -78,8 +78,8 @@ int main(int argc, char**argv) {
         len=sizeof(cliaddr);
 
 
-        if ((child = fork())==0) { //caso seja processo filho
-            close(s);
+        //if ((child = fork())==0) { //caso seja processo filho
+         //   close(s);
             gettimeofday(&tv0,0);//inicia a contagem de tempo
             n = recv(conn,received,sizeof(received),0);
             received[n] = 0;
