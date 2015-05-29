@@ -11,7 +11,6 @@
 
 struct windowPos {
     int seqNumber;
-    int used;
     int AckRcvd;
     char *buffer;
 };
@@ -20,20 +19,43 @@ void windowInit(int *windowIn, int *windowOut) {
     *windowIn = *windowOut = 0;
 }
 
-int windowFull(int tam_janela, int *windowIn, int *windowOut) {
-    if (*windowIn == ((windowOut - 1 + tam_janela)%tam_janela))
+int windowFull(int tam_janela, int windowIn, int windowOut) {
+    if (windowIn == ((windowOut - 1 + tam_janela)%tam_janela))
         return = 1; //janela cheia
     else return 0;
 }
 
+int windowEmpty (int windowIn, int windowOut) {
+    if (windowIn == windowOut)
+        return 1; //janela vazia
+    else return 0;
+}
+
 void windowInsert (struct windowPos* window, struct windowPos newBuffer, int tam_janela, int *windowIn, int *windowOut) {
-    window[windowIn].seqNumber = newBuffer.seqNumber;
-    window[used] = 0;
+    window[*windowIn].seqNumber = newBuffer.seqNumber;
+    window[*windowIn].AckRcvd = 0;
+    strcpy(window[*windowIn].buffer, newBuffer, buffer);
+    *windowIn = (*windowIn + 1)%tam_janela;
+}
+
+int removeAckds (struct windowPos *window, int *windowOut, int tam_janela) {
+    if (window[*windowOut].AckRcvd) {
+        *windowOut = (*windowOut + 1)%tam_janela;
+        return 1;
+    }
+    else return 0;
+}
+
+void acknowledge (struct windowPos *window, int windowOut, int seqNumber, int tam_janela) {
+    int num;
+    //if (seqNumber < window[windowOut].seqNumber) seqNumber+=2*tam_janela;
+    num = seqNumber - window[windowOut].seqNumber;
+    window[windowOut + num].AckRcvd = 1;
 }
 
 
 int main(int argc, char**argv) {
-    int s, ret, len, n, tam_buffer, byte_count, tam_janela;
+    int s, ret, len, n, tam_buffer, byte_count, tam_janela, maxSeqNo;
     struct sockaddr_in6 cliaddr;
     struct addrinfo hints, *res;
     struct timeval tv0, tv1;
@@ -53,6 +75,7 @@ int main(int argc, char**argv) {
     buffer = (char*)malloc(tam_buffer*sizeof(char)); //aloca o buffer
     tam_janela = argv[3]; //tamanho da janela
     window = (struct windowPos*)malloc(tam_janela*sizeof(struct windowPos)); //aloca janela
+    maxSeqNo = 2*tam_janela - 1; //hã o dobro de números de sequência que elementos na janela
 
     //criação do socket UDP
 
