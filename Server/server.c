@@ -8,6 +8,30 @@
 #include <errno.h>
 #include <stdlib.h>
 
+void
+mysettimer(void)
+{
+    struct itimerval newvalue, oldvalue;
+    newvalue.it_value.tv_sec  = 1; //1 segundo de temporização
+    newvalue.it_value.tv_usec = 0;
+    newvalue.it_interval.tv_sec  = 0;
+    newvalue.it_interval.tv_usec = 0;
+    setitimer(ITIMER_REAL, &newvalue, &oldvalue);
+}
+
+void
+timer_handler(int seqNumber)
+{
+    resend(seqNumber); //reenvia o pacote não confirmado
+    mysettimer(espera);  //reinicia o timer
+}
+
+void
+mysethandler(int seqNumber)
+{
+    signal(SIGALRM,timer_handler(seqNumber));
+}
+
 struct windowPos {
     int seqNumber;
     int AckRcvd;
@@ -30,15 +54,17 @@ int windowEmpty (int windowIn, int windowOut) {
     else return 0;
 }
 
-void windowInsert (struct windowPos* window, struct windowPos newBuffer, int tam_janela, int *windowIn, int *windowOut) {
-    window[*windowIn].seqNumber = newBuffer.seqNumber;
+void windowInsert (struct windowPos* window, int tam_buffer, char *buffer, int seqNumber, int tam_janela, int *windowIn) {
+    window[*windowIn].buffer = (char*)malloc(tam_buffer);
+    window[*windowIn].seqNumber = seqNumber;
     window[*windowIn].AckRcvd = 0;
-    strcpy(window[*windowIn].buffer, newBuffer, buffer);
+    strcpy(window[*windowIn].buffer, buffer);
     *windowIn = (*windowIn + 1)%tam_janela;
 }
 
 int removeAckds (struct windowPos *window, int *windowOut, int tam_janela) {
     if (window[*windowOut].AckRcvd) {
+        free(window[*windowOut].buffer);
         *windowOut = (*windowOut + 1)%tam_janela;
         return 1;
     }
@@ -54,7 +80,7 @@ void acknowledge (struct windowPos *window, int windowOut, int seqNumber, int ta
 
 
 int main(int argc, char**argv) {
-    int s, ret, len, n, tam_buffer, byte_count, tam_janela, maxSeqNo;
+    int s, ret, len, n, tam_buffer, byte_count, tam_janela, maxSeqNo, seqNumber;
     struct sockaddr_in6 cliaddr;
     struct addrinfo hints, *res;
     struct timeval tv0, tv1;
@@ -98,8 +124,6 @@ int main(int argc, char**argv) {
 
     while (1) {
         len=sizeof(cliaddr);
-
-
         //if ((child = fork())==0) { //caso seja processo filho
          //   close(s);
             gettimeofday(&tv0,0);//inicia a contagem de tempo
@@ -112,10 +136,19 @@ int main(int argc, char**argv) {
                 exit(1);
             }
             byte_count = 0; //inicia contagem de bytes enviados
-            while(fread(buffer, 1, tam_buffer, arquivo)) {
-                 n = sendto(s, buffer, strlen(buffer),0, (struct sockaddr *)&cliaddr,sizeof(cliaddr));
--                puts(buffer);
-                 byte_count += n;
+            seqNumber = 0;
+            while(1) {
+                if(!windowFull(tam_janela, windowIn, windowOut)) {
+                    if(fread(buffer, 1, tam_buffer, arquivo)) {
+                        n = sendto(s, buffer, strlen(buffer),0, (struct sockaddr *)&cliaddr,sizeof(cliaddr));
+        -               puts(buffer);
+                        windowInsert(window, tam_buffer, buffer, seqNumber, tam_janela, &windowIn);
+                        seqNumber = (seqNumber + 1)%maxSeqNo;
+                        byte_count += n;
+                    }
+                    else break; //fim do arquivo
+                }
+
             }
             fclose(arquivo);
             gettimeofday(&tv1,0);//encera a contagem de tempo
