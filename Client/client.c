@@ -43,18 +43,14 @@ int main(int argc, char**argv) {
     s = socket(res->ai_family,SOCK_DGRAM,0); //cria um socket UDP
     puts("socket criado\n");
 
-
-    connect(s, res->ai_addr, res->ai_addrlen);//I'm gonna do an Internet
-    puts("conectado\n");
-    //conectado ao servidor
-
-
-    n = send(s,argv[3], strlen(argv[3]),0); //envia o nome do arquivo
+    n = sendto(s,argv[3], strlen(argv[3]),0,res->ai_addr,res->ai_addrlen); //envia o nome do arquivo
 
     while (n==-1) {
         printf("Erro ao enviar mensagem.\n");
-        n = send(s,argv[3], strlen(argv[3]),0);
+        n = sendto(s,argv[3], strlen(argv[3]),0,res->ai_addr,res->ai_addrlen);
     }
+
+    puts(argv[3]);
 
     //abre o arquivo que vai ser gravado
     arquivo = fopen(argv[3],"w+");
@@ -67,7 +63,7 @@ int main(int argc, char**argv) {
     tam_buffer = argv[5];
     byte_count = 0; //início da contagem de bytes recebidos
     while (1) {
-        n = recv(s,buffer,tam_buffer,0); //recebe mensagem do server
+        n = recvfrom(s,buffer,tam_buffer,0,NULL,NULL); //recebe mensagem do server
         buffer[n] = 0;
         fwrite(buffer, 1, strlen(buffer), arquivo); //escreve bytes do buffer no arquivo
         byte_count += n; //atualiza contagem de bytes recebidos

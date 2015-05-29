@@ -5,7 +5,6 @@
 #include <sys/types.h>
 #include <netdb.h>
 #include <arpa/inet.h>
-#include <dirent.h>
 #include <errno.h>
 #include <stdlib.h>
 
@@ -104,8 +103,9 @@ int main(int argc, char**argv) {
         //if ((child = fork())==0) { //caso seja processo filho
          //   close(s);
             gettimeofday(&tv0,0);//inicia a contagem de tempo
-            n = recv(conn,received,sizeof(received),0);
+            n = recvfrom(s,received,sizeof(received),0,(struct sockaddr *)&cliaddr, &len);
             received[n] = 0;
+            puts(received);
             arquivo = fopen(received, "r");
             if (arquivo == NULL) {
                 printf("Erro ao abrir o arquivo.");
@@ -113,14 +113,15 @@ int main(int argc, char**argv) {
             }
             byte_count = 0; //inicia contagem de bytes enviados
             while(fread(buffer, 1, tam_buffer, arquivo)) {
-                 n = send(conn, buffer, strlen(buffer),0);
+                 n = sendto(s, buffer, strlen(buffer),0, (struct sockaddr *)&cliaddr,sizeof(cliaddr));
+-                puts(buffer);
                  byte_count += n;
             }
             fclose(arquivo);
             gettimeofday(&tv1,0);//encera a contagem de tempo
             long total = (tv1.tv_sec - tv0.tv_sec)*1000000 + tv1.tv_usec - tv0.tv_usec; //tempo decorrido, em microssegundos
             printf("\nDesempenho: \nBytes enviados: %d \nTempo decorrido (microssegundos): %ld\nThroughput: %f bytes/segundo\n", byte_count, total, (float)byte_count*1000000/total);
-        }
+     //   }
     }
 
     return 0;
