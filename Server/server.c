@@ -82,7 +82,7 @@ void resend (struct windowPos *window, int seqNumber, int windowOut, struct sock
 
 
 int main(int argc, char**argv) {
-    int s, ret, len, n, tam_buffer, byte_count, tam_janela, maxSeqNo, seqNumber;
+    int s, ret, len, n, tam_buffer, byte_count, tam_janela, maxSeqNo, seqNumber, ackNumber;
     struct sockaddr_in6 cliaddr;
     struct addrinfo hints, *res;
     struct timeval tv0, tv1;
@@ -153,10 +153,15 @@ int main(int argc, char**argv) {
                     }
                     else break; //fim do arquivo
                 }
-                //verificar acks
-                //acknowledge
-                //removeAckds
+                n = recvfrom(s,received,8,0,(struct sockaddr *)&cliaddr, &len);
+                received[n] = 0;
+                if (received[0]=='A'&received[1]=='C'&received[2]=='K') {
+                    ackNumber = atoi(received+3); //converte o número de sequência enviado no ack para inteiro
+                    acknowledge(window, windowOut, ackNumber, maxSeqNo);//acknowledge
+                    removeAckds(window, &windowOut, tam_janela);//remove pacotes confirmados da janela
+                }
             }
+
             fclose(arquivo);
             gettimeofday(&tv1,0);//encera a contagem de tempo
             long total = (tv1.tv_sec - tv0.tv_sec)*1000000 + tv1.tv_usec - tv0.tv_usec; //tempo decorrido, em microssegundos
