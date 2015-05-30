@@ -8,9 +8,7 @@
 #include <errno.h>
 #include <stdlib.h>
 
-void
-mysettimer(void)
-{
+void mysettimer(void) {
     struct itimerval newvalue, oldvalue;
     newvalue.it_value.tv_sec  = 1; //1 segundo de temporização
     newvalue.it_value.tv_usec = 0;
@@ -19,16 +17,12 @@ mysettimer(void)
     setitimer(ITIMER_REAL, &newvalue, &oldvalue);
 }
 
-void
-timer_handler(int seqNumber)
-{
-    resend(seqNumber); //reenvia o pacote não confirmado
+void timer_handler(struct windowPos *window, int seqNumber, int windowOut, struct sockaddr_in6 *cliaddr) {
+    resend(window, seqNumber, windowOut, cliaddr); //reenvia o pacote não confirmado
     mysettimer(espera);  //reinicia o timer
 }
 
-void
-mysethandler(int seqNumber)
-{
+void mysethandler(struct windowPos *window, int seqNumber, int windowOut, struct sockaddr_in6 *cliaddr) {
     signal(SIGALRM,timer_handler(seqNumber));
 }
 
@@ -71,11 +65,19 @@ int removeAckds (struct windowPos *window, int *windowOut, int tam_janela) {
     else return 0;
 }
 
-void acknowledge (struct windowPos *window, int windowOut, int seqNumber, int tam_janela) {
+void acknowledge (struct windowPos *window, int windowOut, int seqNumber, int maxSeqNo) {
     int num;
-    //if (seqNumber < window[windowOut].seqNumber) seqNumber+=2*tam_janela;
+    if (seqNumber < window[windowOut].seqNumber) seqNumber+=maxSeqNo;
     num = seqNumber - window[windowOut].seqNumber;
     window[windowOut + num].AckRcvd = 1;
+}
+
+void resend (struct windowPos *window, int seqNumber, int windowOut, struct sockaddr_in6 *cliaddr) {
+        int num;
+        if (seqNumber < window[windowOut].seqNumber) seqNumber+=2*maxSeqNo;
+        num = seqNumber - window[windowOut].seqNumber;
+        sendto(s, window[windowOut + num].buffer, strlen(window[windowOut + num].buffer),0, (struct sockaddr *)cliaddr,sizeof(cliaddr));
+
 }
 
 
@@ -101,6 +103,7 @@ int main(int argc, char**argv) {
     tam_janela = argv[3]; //tamanho da janela
     window = (struct windowPos*)malloc(tam_janela*sizeof(struct windowPos)); //aloca janela
     maxSeqNo = 2*tam_janela - 1; //hã o dobro de números de sequência que elementos na janela
+    windowInit(&windowIn, &windowOut); //inicializa a janela
 
     //criação do socket UDP
 
@@ -143,12 +146,16 @@ int main(int argc, char**argv) {
                         n = sendto(s, buffer, strlen(buffer),0, (struct sockaddr *)&cliaddr,sizeof(cliaddr));
         -               puts(buffer);
                         windowInsert(window, tam_buffer, buffer, seqNumber, tam_janela, &windowIn);
+                        mysethandler(window, seqNumber, windowOut, &cliaddr); //seta o handler de temporização para esse pacote
+                        mysettimer();
                         seqNumber = (seqNumber + 1)%maxSeqNo;
                         byte_count += n;
                     }
                     else break; //fim do arquivo
                 }
-
+                //verificar acks
+                //acknowledge
+                //removeAckds
             }
             fclose(arquivo);
             gettimeofday(&tv1,0);//encera a contagem de tempo
