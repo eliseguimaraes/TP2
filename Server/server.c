@@ -82,7 +82,8 @@ void resend (struct windowPos *window, int seqNumber, int windowOut, struct sock
 
 
 int main(int argc, char**argv) {
-    int s, ret, len, n, tam_buffer, byte_count, tam_janela, maxSeqNo, seqNumber, ackNumber;
+    int s, ret, len, n, tam_buffer, byte_count, tam_janela, maxSeqNo, seqNumber;
+    unsigned int ackNumber;
     struct sockaddr_in6 cliaddr;
     struct addrinfo hints, *res;
     struct timeval tv0, tv1;
@@ -153,10 +154,10 @@ int main(int argc, char**argv) {
                     }
                     else break; //fim do arquivo
                 }
-                n = recvfrom(s,received,8,0,(struct sockaddr *)&cliaddr, &len);
+                n = recvfrom(s,received,2,0,(struct sockaddr *)&cliaddr, &len);
                 received[n] = 0;
-                if (received[0]=='A'&received[1]=='C'&received[2]=='K') {
-                    ackNumber = atoi(received+3); //converte o número de sequência enviado no ack para inteiro
+                if (received[0]=='A') {
+                    ackNumber = unsigned int(received[1]); //converte o número de sequência enviado no ack para inteiro
                     acknowledge(window, windowOut, ackNumber, maxSeqNo);//acknowledge
                     removeAckds(window, &windowOut, tam_janela);//remove pacotes confirmados da janela
                 }
