@@ -17,17 +17,17 @@ void mysettimer(void) {
     setitimer(ITIMER_REAL, &newvalue, &oldvalue);
 }
 
-void timer_handler(struct windowPos *window, int seqNumber, int windowOut, struct sockaddr_in6 *cliaddr) {
+void timer_handler(struct windowPos *window, long seqNumber, int windowOut, struct sockaddr_in6 *cliaddr) {
     resend(window, seqNumber, windowOut, cliaddr); //reenvia o pacote não confirmado
     mysettimer(espera);  //reinicia o timer
 }
 
-void mysethandler(struct windowPos *window, int seqNumber, int windowOut, struct sockaddr_in6 *cliaddr) {
+void mysethandler(struct windowPos *window, long seqNumber, int windowOut, struct sockaddr_in6 *cliaddr) {
     signal(SIGALRM,timer_handler(seqNumber));
 }
 
 struct windowPos {
-    int seqNumber;
+    unsigned long seqNumber;
     int AckRcvd;
     char *buffer;
 };
@@ -48,7 +48,7 @@ int windowEmpty (int windowIn, int windowOut) {
     else return 0;
 }
 
-void windowInsert (struct windowPos* window, int tam_buffer, char *buffer, int seqNumber, int tam_janela, int *windowIn) {
+void windowInsert (struct windowPos* window, int tam_buffer, char *buffer, long seqNumber, int tam_janela, int *windowIn) {
     window[*windowIn].buffer = (char*)malloc(tam_buffer);
     window[*windowIn].seqNumber = seqNumber;
     window[*windowIn].AckRcvd = 0;
@@ -65,14 +65,14 @@ int removeAckds (struct windowPos *window, int *windowOut, int tam_janela) {
     else return 0;
 }
 
-void acknowledge (struct windowPos *window, int windowOut, int seqNumber, int maxSeqNo) {
+void acknowledge (struct windowPos *window, int windowOut, long seqNumber, int maxSeqNo) {
     int num;
     if (seqNumber < window[windowOut].seqNumber) seqNumber+=maxSeqNo;
     num = seqNumber - window[windowOut].seqNumber;
     window[windowOut + num].AckRcvd = 1;
 }
 
-void resend (struct windowPos *window, int seqNumber, int windowOut, struct sockaddr_in6 *cliaddr) {
+void resend (struct windowPos *window, long seqNumber, int windowOut, struct sockaddr_in6 *cliaddr) {
         int num;
         if (seqNumber < window[windowOut].seqNumber) seqNumber+=2*maxSeqNo;
         num = seqNumber - window[windowOut].seqNumber;
@@ -82,8 +82,8 @@ void resend (struct windowPos *window, int seqNumber, int windowOut, struct sock
 
 
 int main(int argc, char**argv) {
-    int s, ret, len, n, tam_buffer, byte_count, tam_janela, maxSeqNo, seqNumber;
-    unsigned int ackNumber;
+    int s, ret, len, n, tam_buffer, byte_count, tam_janela, maxSeqNo;
+    long seqNumber, ackNumber;
     struct sockaddr_in6 cliaddr;
     struct addrinfo hints, *res;
     struct timeval tv0, tv1;
@@ -154,10 +154,10 @@ int main(int argc, char**argv) {
                     }
                     else break; //fim do arquivo
                 }
-                n = recvfrom(s,received,2,0,(struct sockaddr *)&cliaddr, &len);
+                n = recvfrom(s,received,1+sizeof(unsigned long),0,(struct sockaddr *)&cliaddr, &len);
                 received[n] = 0;
                 if (received[0]=='A') {
-                    ackNumber = unsigned int(received[1]); //converte o número de sequência enviado no ack para inteiro
+                    ackNumber = ntohl(*((unsigned long*)(received+1)),0); //converte o número de sequência enviado no ack para inteiro
                     acknowledge(window, windowOut, ackNumber, maxSeqNo);//acknowledge
                     removeAckds(window, &windowOut, tam_janela);//remove pacotes confirmados da janela
                 }
