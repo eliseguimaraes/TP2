@@ -1,0 +1,18 @@
+Comportamento do server (transmissor, no caso):
+
+Verifica se há espaço na janela para envio.
+Lê um buffer no arquivo.
+Envia p/ client e salva tempo. sendto.
+Guarda no vetor de tamanho tam_janela. store_window(char *buffer);
+
+Verifica se recebeu algum ack. recvfrom
+Caso tenha recebido, procura a seqNumber do ack na fila. setAck(int seqNumber)
+Seta a flag "AckRcvd" pra 1.
+
+Roda fila vendo se pode liberar espaços na janela. freeWindow(tam_janela);
+Libera setando used = 0 nas posições que tiverem todas as anteriores com AckRcvd = 1
+
+Reorganiza vetor, dando um shift pra esquerda. reorganize(window);
+
+Roda vetor vendo se alguma posição teve timeout.
+Caso tenha tido, reenvia, resetando o tempo de envio na posição.

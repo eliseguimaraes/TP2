@@ -17,7 +17,7 @@ void mysettimer(void) {
     setitimer(ITIMER_REAL, &newvalue, &oldvalue);
 }
 
-void timer_handler(struct windowPos *window, int seqNumber, int windowOut, struct sockaddr_in6 *cliaddr) {
+void timer_handler(int signum, struct windowPos *window, int seqNumber, int windowOut, struct sockaddr_in6 *cliaddr) {
     resend(window, seqNumber, windowOut, cliaddr); //reenvia o pacote não confirmado
     mysettimer(espera);  //reinicia o timer
 }
