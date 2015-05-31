@@ -1,18 +1,27 @@
-Comportamento do server (transmissor, no caso):
+Server:
+loop:
+Verifica se há espaço para novos envios na janela: windowFull
+Lê buffer do arquivo
+Calcula hash de detecção de erro.
+Cria cabeçalho UDP de 64 bits: hash (32) + número de sequência (32)
+Envia cabeçalho + buffer
+Bufferiza tudo para funcionamento da janela: windowInsert
+Inicializa temporizador de 1s.
+Incrementa o número de sequência.
+Incrementa a contagem de bytes.
+Recebe possíveis acks (64 bits).
+Aplica acks: acknowledge
+Desliza a janela, se preciso: removeAckds
+fim do loop.
 
-Verifica se há espaço na janela para envio.
-Lê um buffer no arquivo.
-Envia p/ client e salva tempo. sendto.
-Guarda no vetor de tamanho tam_janela. store_window(char *buffer);
-
-Verifica se recebeu algum ack. recvfrom
-Caso tenha recebido, procura a seqNumber do ack na fila. setAck(int seqNumber)
-Seta a flag "AckRcvd" pra 1.
-
-Roda fila vendo se pode liberar espaços na janela. freeWindow(tam_janela);
-Libera setando used = 0 nas posições que tiverem todas as anteriores com AckRcvd = 1
-
-Reorganiza vetor, dando um shift pra esquerda. reorganize(window);
-
-Roda vetor vendo se alguma posição teve timeout.
-Caso tenha tido, reenvia, resetando o tempo de envio na posição.
+Client:
+Inicializa a janela, com números de sequência de 0 a tam_janela-1 e todos os Rcvd = 0.
+loop:
+Recebe pacote do server
+Faz detecção de erro.
+Lê número de sequência.
+Buferiza pacotes recebidos corretamente.
+Atualiza janela e lastRcvd (último pacote recebido na ordem correta).
+Desliza janela, se possível.
+Envia Ack com número de lastRcvd.
+fim do loop
