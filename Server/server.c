@@ -7,18 +7,19 @@
 #include <arpa/inet.h>
 #include <errno.h>
 #include <stdlib.h>
+#include <math.h>
 
 #define TIMEOUT_MS 1000 //timeout de um segundo
 
 struct windowPos {
-    long int seqNumber;
+    int seqNumber;
     int AckRcvd;
     char *buffer;
     char *pkg;
 };
 
 int s,tam_buffer, tam_janela, tam_pkg;
-long int maxSeqNo;
+int maxSeqNo;
 struct sockaddr_in6 cliaddr;
 int windowIn, windowOut;
 struct windowPos *window;
@@ -41,7 +42,7 @@ void windowInit(void) {
 
 int windowFull(void) {
     if (windowIn == ((windowOut - 1 + tam_janela)%tam_janela))
-        return = 1; //janela cheia
+        return 1; //janela cheia
     else return 0;
 }
 
@@ -51,12 +52,12 @@ int windowEmpty (void) {
     else return 0;
 }
 
-void windowInsert (char *buffer, char* pkg, long int seqNumber) {
+void windowInsert (char *buffer, char* pkg, int seqNumber) {
     window[windowIn].buffer = (char*)malloc(tam_buffer);
     window[windowIn].pkg = (char*)malloc(tam_pkg);
     window[windowIn].seqNumber = seqNumber;
     window[windowIn].AckRcvd = 0;
-    strcpy(window[windowIn].bufferhttps://www.dropbox.com/sh/36qj54z7bf50vxu/AADPD6i75WG6dq0Kzunpuej7a?dl=0&preview=2011-02-03+02.01.47.jpg, buffer);
+    strcpy(window[windowIn].buffer, buffer);
     strcpy(window[windowIn].pkg, pkg);
     windowIn = (windowIn + 1)%tam_janela;
 }
@@ -69,37 +70,80 @@ int removeAckds (void) {
     }
     else return 0;
 }
-void acknowledge (long int seqNumber) { //ack received means all packages before that arrived in order
+void acknowledge (int seqNumber) { //número do ack representa que todos os pacotes antes desse chegaram na ordem
     int num, i;
-    num = (seqNumber - window[windowOut].seqNumber)%maxSeqNo;
-    for (i=0; i<=num; i++) {
-        window[windowOut + i].AckRcvd = 1;
+    num = (seqNumber - window[windowOut].seqNumber)%maxSeqNo; //distância até o número do ack
+    if (num<tam_janela) { //se ainda está na janela
+        for (i=0; i<=num; i++) {
+            window[windowOut + i].AckRcvd = 1;
+        }
     }
 }
 
-void resend (long int seqNumber) {
+void resend (int seqNumber) {
         int num;
-        if (seqNumber < window[windowOut].seqNumber) seqNumber+=2*maxSeqNo;
-        num = seqNumber - window[windowOut].seqNumber;
-        sendto(s, window[windowOut + num].pkg, strlen(window[windowOut + num].pkg),0, (struct sockaddr *)cliaddr,sizeof(cliaddr));
+        num = (seqNumber - window[windowOut].seqNumber)%tam_janela;
+        sendto(s, (window+windowOut + num)->pkg, strlen((window+windowOut + num)->pkg),0, (struct sockaddr *)&cliaddr,sizeof(cliaddr));
 }
 
 void resendAll () {
     int i = windowOut;
     while (i!=windowIn) {
-        sendto(s, window[i].pkg, strlen(window[i].pkg),0, (struct sockaddr *)cliaddr,sizeof(cliaddr));
+        sendto(s, window[i].pkg, strlen(window[i].pkg),0, (struct sockaddr *)&cliaddr,sizeof(cliaddr));
         i = (i+1)%tam_janela;
     }
 }
 
+void serialize (char *pkg, int seqNumber, unsigned long hash_no, char *buffer) {
+    int i, a;
+    a = sizeof(int);
+    i = 0;
+    while (a) { //serializa o inteiro
+        a--;
+        pkg[i] = seqNumber >> a*8;
+        i++;
+    }
+    a = sizeof(unsigned long);
+    while (a) { //serializa o unsigned long
+        a--;
+        pkg[i] = hash_no >> a*8;
+        i++;
+    }
+    a = strlen(buffer);
+    while (a) { //serializa a string
+        a--;
+        pkg[i] = buffer[a];
+        i++;
+    }
+    pkg[i] = 0;
+}
+
+void deserialize (char *ack, int *ackNumber, char *buffer) {//"deserializa" o ack
+    int i, a;
+    i = 0;
+    *ackNumber = 0;
+    a = sizeof(int);
+    while (a) {
+        a--;
+        *ackNumber += ack[i]*pow(8,a);
+        i++;
+    }
+    a = strlen(ack) - sizeof(int);
+    buffer[a+1] = 0;
+    while(a) {
+        a--;
+        buffer[a] = ack[i];
+        i++;
+    }
+}
 
 int main(int argc, char**argv) {
     int ret, len, n, byte_count;
     struct addrinfo hints, *res;
     struct timeval tv0, tv1,tv;
-    long int seqNumber, ackNumber;
+    int seqNumber, ackNumber;
     unsigned long hash_no;
-    char received[256], sent[256];
+    char received[256], *pkg, aux[4];
     char *buffer;
     FILE *arquivo;
     pid_t child;
@@ -109,11 +153,13 @@ int main(int argc, char**argv) {
         exit(1);
     }
 
-    tam_buffer = argv[2]; //tamanho do buffer
+    tam_buffer = atoi(argv[2]); //tamanho do buffer
     buffer = (char*)malloc(tam_buffer*sizeof(char)); //aloca o buffer
-    tam_janela = argv[3]; //tamanho da janela
+    tam_janela = atoi(argv[3]); //tamanho da janela
     window = (struct windowPos*)malloc(tam_janela*sizeof(struct windowPos)); //aloca janela
     maxSeqNo = 2*tam_janela; //há o dobro de números de sequência que elementos na janela
+    tam_pkg = tam_buffer + sizeof(int) + sizeof(unsigned long);
+    pkg = (char*)malloc(tam_pkg);
     windowInit(); //inicializa a janela
 
     //criação do socket UDP
@@ -131,9 +177,9 @@ int main(int argc, char**argv) {
 
     s=socket(res->ai_family,SOCK_DGRAM,0);
     puts("socket criado.\n");
-
-    tv.tv_sec = 0;
-    tv.tv_usec = TIMEOUT_MS*1000; //setando o timeout
+    //setando o timeout no socket
+    tv.tv_sec = TIMEOUT_MS/1000;
+    tv.tv_usec = 0;
     if (setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, &tv,sizeof(tv))<0) {
         perror("Error");
     }
@@ -147,8 +193,7 @@ int main(int argc, char**argv) {
         //if ((child = fork())==0) { //caso seja processo filho
          //   close(s);
             gettimeofday(&tv0,0);//inicia a contagem de tempo
-            n = recvfrom(s,received,sizeof(received),0,(struct sockaddr *)&cliaddr, &len);
-            received[n] = 0;
+            while (n = recvfrom(s,received,sizeof(received),0,(struct sockaddr *)&cliaddr, &len) < 0) {}
             puts(received);
             arquivo = fopen(received, "r");
             if (arquivo == NULL) {
@@ -161,23 +206,21 @@ int main(int argc, char**argv) {
                 if(!windowFull()) {
                     if(fread(buffer, 1, tam_buffer+1, arquivo)) {
                         hash_no = hash(buffer);
-                        strcpy(sent, htonl(hash_no)); //detecção de erro: 32 bits
-                        strcat(sent, htonl(seqNumber)); //número de sequência: 32 bits
-                        strcat(sent, buffer); //dados: tamanho do buffer
-                        n = sendto(s, sent, strlen(sent),0, (struct sockaddr *)&cliaddr,sizeof(cliaddr));
-                        windowInsert(buffer, sent, seqNumber);
+                        serialize(pkg,seqNumber,hash_no,buffer);
+                        n = sendto(s, pkg, strlen(pkg),0, (struct sockaddr *)&cliaddr,sizeof(cliaddr));
+                        windowInsert(buffer, pkg, seqNumber);
                         seqNumber = (seqNumber + 1)%maxSeqNo;
                         byte_count += n;
                     }
                     else break; //fim do arquivo
                 }
-                if(n = recvfrom(s,received,2*sizeof(unsigned long),0,(struct sockaddr *)&cliaddr, &len)<0) { //verifica se chegou algum ACK
+                if(n = recvfrom(s,received,4+sizeof(int),0,(struct sockaddr *)&cliaddr, &len)<0) { //verifica se chegou algum ACK
                     resendAll(); //timeout
                 }
                 else {
                     received[n] = 0;
-                    if (strncmp(received, "ackn",4)) { //verifica ACK (32 primeiros algarismos do PI para correção)
-                        ackNumber = ntohl((received+4),0); //converte o número de sequência enviado no ack para número
+                    deserialize(received,&ackNumber,aux);
+                    if (strcmp(aux, "ackn")) { //verifica se é ACK
                         acknowledge(ackNumber);//acknowledge
                         while(removeAckds()){}//remove pacotes confirmados da janela
                         resendAll(); //reenvia todos os que não foram confirmados

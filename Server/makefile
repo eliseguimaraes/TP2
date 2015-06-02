@@ -4,7 +4,7 @@ JANELA = 3
 CC = gcc
 
 server:
-	$(CC) server.c -o server
+	$(CC) server.c -lm -o server
 
 run:
 	./server $(PORT) $(BUFFER) $(JANELA)
