@@ -12,11 +12,11 @@ struct windowPos {
     long int seqNumber;
     int Rcvd;
     char *buffer;
-    char *packet;
+    char *pkg;
 };
 
-int s, tam_buffer, tam_janela;
-long int seqNumber, ackNumber, maxSeqNo
+int s, tam_buffer, tam_janela, tam_pkg;
+long int maxSeqNo, lastRcvd;
 struct sockaddr_in6 cliaddr;
 int windowIn, windowOut;
 struct windowPos *window;
@@ -32,32 +32,10 @@ unsigned long hash(unsigned char *str) {
     return hash;
 }
 
-void mysettimer(void) {
-    struct itimerval newvalue, oldvalue;
-    newvalue.it_value.tv_sec  = 1; //1 segundo de temporização
-    newvalue.it_value.tv_usec = 0;
-    newvalue.it_interval.tv_sec  = 0;
-    newvalue.it_interval.tv_usec = 0;
-    setitimer(ITIMER_REAL, &newvalue, &oldvalue);
-}
-
-void timer_handler(int signum) {
-    int num;
-    resend(seqNumber); //reenvia o pacote não confirmado
-    mysettimer(espera);  //reinicia o timer caso o ack ainda não tenha sido recebido
-}
-
 void mysethandler(void) {
     signal(SIGALRM,timer_handler);
 }
 
-void windowInit(void) {
-    int i;
-    windowIn = windowOut = 0;
-    while(!windowFull()) {
-
-    }
-}
 
 int windowFull(void) {
     if (windowIn == ((windowOut - 1 + tam_janela)%tam_janela))
@@ -71,36 +49,29 @@ int windowEmpty (void) {
     else return 0;
 }
 
-void windowInsert (char *buffer, char* packet, long int seqNumber) {
+void windowInsert (char *buffer, char* pkg, long int seqNumber) {
     window[windowIn].buffer = (char*)malloc(tam_buffer);
+    window[windowIn].pkg = (char*)malloc(tam_pkg);
     window[windowIn].seqNumber = seqNumber;
-    window[windowIn].AckRcvd = 0;
+    window[windowIn].Rcvd = 1;
     strcpy(window[windowIn].buffer, buffer);
-    strcpy(window[windowIn].packet, packet);
+    strcpy(window[windowIn].pkg, pkg);
     windowIn = (windowIn + 1)%tam_janela;
 }
 
-int removeAckds (void) {
-    if (window[windowOut].AckRcvd) {
+int removeRcvds (void) {
+    if (window[windowOut].Rcvd) {
         free(window[windowOut].buffer);
+        lastRcvd = window[windowOut].seqNumber;
         windowOut = (windowOut + 1)%tam_janela;
         return 1;
     }
     else return 0;
 }
 
-void acknowledge (long int seqNumber) {
-    int num;
-    if (seqNumber < window[windowOut].seqNumber) seqNumber+=maxSeqNo;
-    num = seqNumber - window[windowOut].seqNumber;
-    window[windowOut + num].AckRcvd = 1;
-}
-
-void resend (long int seqNumber) {
-        int num;
-        if (seqNumber < window[windowOut].seqNumber) seqNumber+=2*maxSeqNo;
-        num = seqNumber - window[windowOut].seqNumber;
-        sendto(s, window[windowOut + num].packet, strlen(window[windowOut + num].packet),0, (struct sockaddr *)cliaddr,sizeof(cliaddr));
+void acknowledge () { //confirma o último pacote recebido em ordem
+        char string[8];
+        sendto(s, window[windowOut + num].pkg, strlen(window[windowOut + num].pkg),0, (struct sockaddr *)cliaddr,sizeof(cliaddr));
 }
 
 
@@ -108,19 +79,19 @@ int main(int argc, char**argv) {
     int n,ret, byte_count;
     struct addrinfo hints, *res = NULL;
     struct timeval tv0, tv1;
+    long int seqNumber, ackNumber;
     unsigned long hash_no;
-    char *buffer, *pkg;
+    char *buffer, *pkg, aux[8];
     FILE* arquivo;
-
-    flag = 0;
 
     if (argc != 6) {
         printf("Argumentos necessarios: host_servidor, porto_servidor, nome_arquivo, tam_buffer, tam_janela.\n");
         exit(1);
     }
 
-    tam_janela = argv[6];
-    tam_buffer = argv[5];
+    tam_janela = argv[5];
+    tam_buffer = argv[4];
+    lastRcvd = -1; //nada foi recebido ainda
     buffer = (char*)malloc(tam_buffer*sizeof(char));
     tam_pkg = tam_buffer + 8;
     pkg = (char*)malloc((tam_pkg)*sizeof(char)); //o pacote terá tamanho = 64 bits (cabeçalho) + tam_buffer
@@ -162,11 +133,21 @@ int main(int argc, char**argv) {
     //loop recebe o arquivo buffer a buffer até o fim
     byte_count = 0; //início da contagem de bytes recebidos
     while (1) {
-        n = recvfrom(s,pkg,tam_pkg,0,NULL,NULL); //recebe mensagem do server + cabeçalho UDP (64 bits = 8 bytes)
+        while(n = recvfrom(s,pkg,tam_pkg,0,NULL,NULL)<0){} //recebe mensagem do server + cabeçalho UDP (64 bits = 8 bytes)
         pkg[n] = 0;
+        strncpy(aux,pkg,8);//copia a parte correspondente à correção
+        hash_no = ntohl(aux);
+        strncpy(aux, pkg+8,8);//copia a parte correspondente ao número de sequência
+        seqNumber = ntohl(aux);
+        strcpy(buffer, pkg+16); //copia o restante para buferizar
         //detecta erros
-        //lê número de sequência
+        if(hash_no != hash(buffer)) {
+            puts("Erro detectado");
+            continue; //se detectou erro, salta para a próxima iteração
+        }
         //buferiza
+        windowInsert(buffer, pkg, seqNumber);
+
         fwrite(buffer, 1, strlen(buffer), arquivo); //escreve bytes do buffer no arquivo
         byte_count += n; //atualiza contagem de bytes recebidos
     }

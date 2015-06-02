@@ -9,17 +9,18 @@ Bufferiza tudo para funcionamento da janela: windowInsert
 Inicializa temporizador de 1s.
 Incrementa o número de sequência.
 Incrementa a contagem de bytes.
-Recebe possíveis acks (64 bits).
+Recebe possíveis acks (64 bits), com um timeout de 1s.
 Aplica acks: acknowledge
-Desliza a janela, se preciso: removeAckds
+Desliza a janela, se preciso: removeAckds.
+Reenvia os não confirmados.
 fim do loop.
 
 Client:
 Inicializa a janela, com números de sequência de 0 a tam_janela-1 e todos os Rcvd = 0.
 loop:
-Recebe pacote do server
+Recebe pacote do server.
+Lê pacote e salva o que recebeu em hash_no, SeqNumber e buffer.
 Faz detecção de erro.
-Lê número de sequência.
 Buferiza pacotes recebidos corretamente.
 Atualiza janela e lastRcvd (último pacote recebido na ordem correta).
 Desliza janela, se possível.
