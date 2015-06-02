@@ -16,7 +16,6 @@ Reenvia os não confirmados.
 fim do loop.
 
 Client:
-Inicializa a janela, com números de sequência de 0 a tam_janela-1 e todos os Rcvd = 0.
 loop:
 Recebe pacote do server.
 Lê pacote e salva o que recebeu em hash_no, SeqNumber e buffer.

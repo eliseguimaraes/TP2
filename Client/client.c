@@ -69,11 +69,6 @@ int removeRcvds (void) {
     else return 0;
 }
 
-void acknowledge () { //confirma o último pacote recebido em ordem
-        char string[8];
-        sendto(s, window[windowOut + num].pkg, strlen(window[windowOut + num].pkg),0, (struct sockaddr *)cliaddr,sizeof(cliaddr));
-}
-
 
 int main(int argc, char**argv) {
     int n,ret, byte_count;
@@ -133,23 +128,33 @@ int main(int argc, char**argv) {
     //loop recebe o arquivo buffer a buffer até o fim
     byte_count = 0; //início da contagem de bytes recebidos
     while (1) {
-        while(n = recvfrom(s,pkg,tam_pkg,0,NULL,NULL)<0){} //recebe mensagem do server + cabeçalho UDP (64 bits = 8 bytes)
-        pkg[n] = 0;
-        strncpy(aux,pkg,8);//copia a parte correspondente à correção
-        hash_no = ntohl(aux);
-        strncpy(aux, pkg+8,8);//copia a parte correspondente ao número de sequência
-        seqNumber = ntohl(aux);
-        strcpy(buffer, pkg+16); //copia o restante para buferizar
-        //detecta erros
-        if(hash_no != hash(buffer)) {
-            puts("Erro detectado");
-            continue; //se detectou erro, salta para a próxima iteração
+        if (!windowFull()) {
+            while(n = recvfrom(s,pkg,tam_pkg,0,NULL,NULL)<0){} //recebe mensagem do server + cabeçalho UDP (64 bits = 8 bytes)
+            pkg[n] = 0;
+            strncpy(aux,pkg,4);//copia a parte correspondente à correção
+            hash_no = ntohl(aux);
+            strncpy(aux, pkg+4,4);//copia a parte correspondente ao número de sequência
+            seqNumber = ntohl(aux);
+            strcpy(buffer, pkg+8); //copia o restante para buferizar
+            //detecta erros
+            if(hash_no != hash(buffer)) {
+                puts("Erro detectado");
+                continue; //se detectou erro, salta para a próxima iteração
+            }
+            //buferiza
+            windowInsert(buffer, pkg, seqNumber);
+            removeRcvds();
+            fwrite(buffer, 1, strlen(buffer), arquivo); //escreve bytes do buffer no arquivo
+            byte_count += n; //atualiza contagem de bytes recebidos
         }
-        //buferiza
-        windowInsert(buffer, pkg, seqNumber);
-
-        fwrite(buffer, 1, strlen(buffer), arquivo); //escreve bytes do buffer no arquivo
-        byte_count += n; //atualiza contagem de bytes recebidos
+        //envia ack do último recevido em ordem
+        strcpy(aux, "ackn");
+        strcat(aux, htonl(lastRcvd));
+        n = sendto(s,aux,8,0,res->ai_addr,res->ai_addrlen); //envia o nome do arquivo
+        while (n==-1) {
+            printf("Erro ao enviar ack.\n");
+            n = sendto(s,aux,8,0,res->ai_addr,res->ai_addrlen);
+        }
     }
 
     fclose(arquivo);
