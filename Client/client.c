@@ -107,6 +107,7 @@ void windowInsert (char *buffer, char* pkt, int seqNumber) {
 int removeRcvds (void) {
     if (window[windowOut].Rcvd) {
         free(window[windowOut].buffer);
+        free(window[windowOut].pkt);
         lastRcvd = window[windowOut].seqNumber;
         windowOut = (windowOut + 1)%tam_janela;
         return 1;
@@ -200,6 +201,8 @@ int main(int argc, char**argv) {
     }
 
     fclose(arquivo);
+    free(buffer);
+    free(pkt);
 
     close(s); //encerra a conexão
 
