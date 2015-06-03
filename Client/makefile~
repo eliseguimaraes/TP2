@@ -6,7 +6,7 @@ JANELA = 3
 CC = gcc
 
 server:
-	$(CC) -lm client.c -o client
+	$(CC) client.c -lm -o client
 
 run:
 	./client $(IP) $(PORT) $(FILE) $(BUFFER) $(JANELA)

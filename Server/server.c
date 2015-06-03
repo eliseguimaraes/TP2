@@ -15,10 +15,10 @@ struct windowPos {
     int seqNumber;
     int AckRcvd;
     char *buffer;
-    char *pkg;
+    char *pkt;
 };
 
-int s,tam_buffer, tam_janela, tam_pkg;
+int s,tam_buffer, tam_janela, tam_pkt;
 int maxSeqNo;
 struct sockaddr_in6 cliaddr;
 int windowIn, windowOut;
@@ -52,19 +52,20 @@ int windowEmpty (void) {
     else return 0;
 }
 
-void windowInsert (char *buffer, char* pkg, int seqNumber) {
+void windowInsert (char *buffer, char* pkt, int seqNumber) {
     window[windowIn].buffer = (char*)malloc(tam_buffer);
-    window[windowIn].pkg = (char*)malloc(tam_pkg);
+    window[windowIn].pkt = (char*)malloc(tam_pkt);
     window[windowIn].seqNumber = seqNumber;
     window[windowIn].AckRcvd = 0;
     strcpy(window[windowIn].buffer, buffer);
-    strcpy(window[windowIn].pkg, pkg);
+    strcpy(window[windowIn].pkt, pkt);
     windowIn = (windowIn + 1)%tam_janela;
 }
 
 int removeAckds (void) {
     if (window[windowOut].AckRcvd) {
         free(window[windowOut].buffer);
+        free(window[windowOut].pkt);
         windowOut = (windowOut + 1)%tam_janela;
         return 1;
     }
@@ -83,39 +84,39 @@ void acknowledge (int seqNumber) { //número do ack representa que todos os paco
 void resend (int seqNumber) {
         int num;
         num = (seqNumber - window[windowOut].seqNumber)%tam_janela;
-        sendto(s, (window+windowOut + num)->pkg, strlen((window+windowOut + num)->pkg),0, (struct sockaddr *)&cliaddr,sizeof(cliaddr));
+        sendto(s, (window+windowOut + num)->pkt, strlen((window+windowOut + num)->pkt),0, (struct sockaddr *)&cliaddr,sizeof(cliaddr));
 }
 
 void resendAll () {
     int i = windowOut;
     while (i!=windowIn) {
-        sendto(s, window[i].pkg, strlen(window[i].pkg),0, (struct sockaddr *)&cliaddr,sizeof(cliaddr));
+        sendto(s, window[i].pkt, strlen(window[i].pkt),0, (struct sockaddr *)&cliaddr,sizeof(cliaddr));
         i = (i+1)%tam_janela;
     }
 }
 
-void serialize (char *pkg, int seqNumber, unsigned long hash_no, char *buffer) {
+void serialize (char *pkt, int seqNumber, unsigned long hash_no, char *buffer) {
     int i, a;
     a = sizeof(int);
     i = 0;
     while (a) { //serializa o inteiro
         a--;
-        pkg[i] = seqNumber >> a*8;
+        pkt[i] = seqNumber >> a*8;
         i++;
     }
     a = sizeof(unsigned long);
     while (a) { //serializa o unsigned long
         a--;
-        pkg[i] = hash_no >> a*8;
+        pkt[i] = hash_no >> a*8;
         i++;
     }
     a = strlen(buffer);
     while (a) { //serializa a string
         a--;
-        pkg[i] = buffer[a];
+        pkt[i] = buffer[a];
         i++;
     }
-    pkg[i] = 0;
+    pkt[i] = 0;
 }
 
 void deserialize (char *ack, int *ackNumber, char *buffer) {//"deserializa" o ack
@@ -143,7 +144,7 @@ int main(int argc, char**argv) {
     struct timeval tv0, tv1,tv;
     int seqNumber, ackNumber;
     unsigned long hash_no;
-    char received[256], *pkg, aux[4];
+    char received[256], *pkt, aux[4];
     char *buffer;
     FILE *arquivo;
     pid_t child;
@@ -158,8 +159,8 @@ int main(int argc, char**argv) {
     tam_janela = atoi(argv[3]); //tamanho da janela
     window = (struct windowPos*)malloc(tam_janela*sizeof(struct windowPos)); //aloca janela
     maxSeqNo = 2*tam_janela; //há o dobro de números de sequência que elementos na janela
-    tam_pkg = tam_buffer + sizeof(int) + sizeof(unsigned long);
-    pkg = (char*)malloc(tam_pkg);
+    tam_pkt = tam_buffer + sizeof(int) + sizeof(unsigned long);
+    pkt = (char*)malloc(tam_pkt);
     windowInit(); //inicializa a janela
 
     //criação do socket UDP
@@ -206,9 +207,9 @@ int main(int argc, char**argv) {
                 if(!windowFull()) {
                     if(fread(buffer, 1, tam_buffer+1, arquivo)) {
                         hash_no = hash(buffer);
-                        serialize(pkg,seqNumber,hash_no,buffer);
-                        n = sendto(s, pkg, strlen(pkg),0, (struct sockaddr *)&cliaddr,sizeof(cliaddr));
-                        windowInsert(buffer, pkg, seqNumber);
+                        serialize(pkt,seqNumber,hash_no,buffer);
+                        n = sendto(s, pkt, strlen(pkt),0, (struct sockaddr *)&cliaddr,sizeof(cliaddr));
+                        windowInsert(buffer, pkt, seqNumber);
                         seqNumber = (seqNumber + 1)%maxSeqNo;
                         byte_count += n;
                     }

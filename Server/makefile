@@ -1,5 +1,5 @@
 PORT = 32000
-BUFFER = 8
+BUFFER = 9
 JANELA = 3
 CC = gcc
 

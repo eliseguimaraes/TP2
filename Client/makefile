@@ -1,7 +1,7 @@
 IP = 127.0.0.1
 PORT = 32000
 FILE = arquivo.txt
-BUFFER = 8
+BUFFER = 9
 JANELA = 3
 CC = gcc
 

@@ -130,12 +130,15 @@ int main(int argc, char**argv) {
         exit(1);
     }
 
-    tam_janela = argv[5];
-    tam_buffer = argv[4];
+    tam_janela = atoi(argv[5]);
+    tam_buffer = atoi(argv[4]);
     lastRcvd = -1; //nada foi recebido ainda
     buffer = (char*)malloc(tam_buffer*sizeof(char));
-    tam_pkt = tam_buffer + 8;
-    pkt = (char*)malloc((tam_pkt)*sizeof(char)); //o pacote terá tamanho = 64 bits (cabeçalho) + tam_buffer
+    printf("%d",sizeof(buffer));
+    tam_pkt = tam_buffer + sizeof(int) + sizeof(unsigned long);
+	printf("\n%d %d\n",tam_buffer,tam_pkt);
+    pkt = (char*)malloc(tam_pkt); //o pacote terá tamanho = 12 Bytes (cabeçalho) + tam_buffer
+	printf("%d",sizeof(pkt));
 
     gettimeofday(&tv0,0); //inicia a contagem de tempo
 
