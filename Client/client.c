@@ -16,17 +16,17 @@ struct windowPos {
     char *pkt;
 };
 
-int s, tam_buffer, tam_janela, tam_pkt;
+int s, tam_buffer, tam_janela, tam_pkt, windowRoom;
 int maxSeqNo, lastRcvd;
 struct sockaddr_in6 cliaddr;
 int windowIn, windowOut;
 struct windowPos *window;
 
-void deserialize (char *pkt, int *seqNumber, unsigned long *hash_no, char *buffer) {//não sei se a palavra "deserializar" existe. procurar.
+void deserialize (char *pkt, int *seqNumber, int *checkResult, char *buffer, int n) {//não sei se a palavra "deserializar" existe. procurar.
     int i, a;
     i = 0;
     *seqNumber = 0;
-    *hash_no = 0;
+    *checkResult = 0;
     a = sizeof(int);
     while (a) {
         a--;
@@ -34,14 +34,14 @@ void deserialize (char *pkt, int *seqNumber, unsigned long *hash_no, char *buffe
         i++;
 
     }
-    a = sizeof(unsigned long);
+    a = sizeof(int);
     while (a) {
         a--;
-        *hash_no += pkt[i]*pow(8,a);
+        *checkResult += pkt[i]*pow(8,a);
         i++;
     }
-    printf("\n%lu",*hash_no);
-    a = strlen(pkt) - sizeof(int) - sizeof(unsigned long);
+    a = n - 2*sizeof(int);
+    fprintf(stderr,"%d",a);
     buffer[a+1] = 0;
     while(a) {
         a--;
@@ -70,15 +70,10 @@ void serialize (char *aux, int lastRcvd) { //serialização dos acks
     aux[i] = 0;
 }
 
-unsigned long hash(unsigned char *str) {
-//gera um hash para uma string, para detecção de erro
-//djb2
-//retrieved from: http://www.cse.yorku.ca/~oz/hash.html
-    unsigned long hash = 5381;
-    int c;
-    while (c = *str++)
-        hash = ((hash << 5) + hash) + c; /* hash * 33 + c */
-    return hash;
+int checksum (char *str) {
+    int i, checkResult = 0;
+    for (i=0; str[i]!='\0'; i++)
+        checkResult += (int)str[i];
 }
 
 
@@ -94,16 +89,36 @@ int windowEmpty (void) {
     else return 0;
 }
 
-void windowInsert (char *buffer, char* pkt, int seqNumber) {
-    window[windowIn].buffer = (char*)malloc(tam_buffer);
-    window[windowIn].pkt = (char*)malloc(tam_pkt);
-    window[windowIn].seqNumber = seqNumber;
-    window[windowIn].Rcvd = 1;
-    strcpy(window[windowIn].buffer, buffer);
-    strcpy(window[windowIn].pkt, pkt);
-    windowIn = (windowIn + 1)%tam_janela;
+void windowReserve (int seqNumber) { //cria espaços na janela para buferizar novos elementos
+        window[windowIn].buffer = (char*)malloc(tam_buffer);
+        window[windowIn].pkt = (char*)malloc(tam_pkt);
+        window[windowIn].seqNumber = seqNumber;
+        window[windowIn].Rcvd = 0;
+        windowIn = (windowIn + 1)%tam_janela;
+        windowRoom++;
 }
 
+
+void windowInit ()  { //inicializa a janela
+    windowIn = 0;
+    windowOut = 0;
+    int i;
+    for (i=0; i<tam_janela; i++)
+        windowReserve(i);
+
+    windowRoom = tam_janela;
+}
+
+void windowStore (char *buffer, char *pkt, int seqNumber) {
+        int num;
+        num = (seqNumber - window[windowOut].seqNumber)%maxSeqNo;
+        if (num < tam_janela) {
+            strcpy(window[windowOut + num].buffer,buffer);
+            strcpy(window[windowOut + num].pkt,pkt);
+            window[windowOut + num].Rcvd = 1;
+            windowRoom--;
+        }
+}
 int removeRcvds (void) {
     if (window[windowOut].Rcvd) {
         free(window[windowOut].buffer);
@@ -117,7 +132,7 @@ int removeRcvds (void) {
 
 
 int main(int argc, char**argv) {
-    int n,ret, byte_count;
+    int n,ret, byte_count, nextSeq, checkResult;
     struct addrinfo hints, *res = NULL;
     struct timeval tv0, tv1;
     int seqNumber;
@@ -126,19 +141,17 @@ int main(int argc, char**argv) {
     FILE* arquivo;
 
     if (argc != 6) {
-        printf("Argumentos necessarios: host_servidor, porto_servidor, nome_arquivo, tam_buffer, tam_janela.\n");
+        fprintf(stderr,"Argumentos necessarios: host_servidor, porto_servidor, nome_arquivo, tam_buffer, tam_janela.\n");
         exit(1);
     }
 
     tam_janela = atoi(argv[5]);
     tam_buffer = atoi(argv[4]);
     lastRcvd = -1; //nada foi recebido ainda
+    window = (struct windowPos*)malloc(tam_janela*sizeof(struct windowPos));
     buffer = (char*)malloc(tam_buffer*sizeof(char));
-    printf("%d",sizeof(buffer));
-    tam_pkt = tam_buffer + sizeof(int) + sizeof(unsigned long);
-	printf("\n%d %d\n",tam_buffer,tam_pkt);
-    pkt = (char*)malloc(tam_pkt); //o pacote terá tamanho = 12 Bytes (cabeçalho) + tam_buffer
-	printf("%d",sizeof(pkt));
+    tam_pkt = tam_buffer + 2*sizeof(int);
+    pkt = (char*)malloc(tam_pkt); //o pacote terá tamanho = 8 bytes (cabeçalho) + tam_buffer
 
     gettimeofday(&tv0,0); //inicia a contagem de tempo
 
@@ -151,7 +164,7 @@ int main(int argc, char**argv) {
     ret = getaddrinfo(argv[1], argv[2], &hints, &res);
 
     if(ret) {
-        printf("Endereço inválido.\n");
+        fprintf(stderr,"Endereço inválido.\n");
         exit(1);
     }
 
@@ -161,34 +174,40 @@ int main(int argc, char**argv) {
     n = sendto(s,argv[3], strlen(argv[3]),0,res->ai_addr,res->ai_addrlen); //envia o nome do arquivo
 
     while (n==-1) {
-        printf("Erro ao enviar mensagem.\n");
+        fprintf(stderr,"Erro ao enviar mensagem.\n");
         n = sendto(s,argv[3], strlen(argv[3]),0,res->ai_addr,res->ai_addrlen);
     }
 
     //abre o arquivo que vai ser gravado
     arquivo = fopen(argv[3],"w+");
     if (arquivo == NULL) {
-        printf("Erro ao criar o arquivo");
+        fprintf(stderr,"Erro ao criar o arquivo");
         exit(1);
     }
-
     //loop recebe o arquivo buffer a buffer até o fim
     byte_count = 0; //início da contagem de bytes recebidos
+    windowInit();
     while (1) {
-        if (!windowFull()) {
-            while(n = recvfrom(s,pkt,tam_pkt,0,NULL,NULL)<0){} //recebe mensagem do server + cabeçalho UDP (64 bits = 8 bytes)
+        if (windowRoom) {
+            fprintf(stderr,"%d", windowRoom);
+            while(n = recvfrom(s,pkt,tam_pkt,0,NULL,NULL)<=0) {}//recebe mensagem do server + cabeçalho UDP
             pkt[n] = 0;
-            deserialize(pkt, &seqNumber,&hash_no,buffer);
             puts("aqui");
-            printf("%d %lu %s", seqNumber, hash_no, buffer);
+            //fprintf(stderr,"    %d    ", n);
+            deserialize(pkt, &seqNumber,&checkResult,buffer, n);
             //detecta erros
-            if(hash_no != hash(buffer)) {
+            if(checkResult != checksum(buffer)) {
                 puts("Erro detectado");
                 continue; //se detectou erro, salta para a próxima iteração
             }
             //buferiza
-            windowInsert(buffer, pkt, seqNumber);
-            removeRcvds();
+            windowStore(buffer, pkt, seqNumber);
+            while(removeRcvds());
+            nextSeq = (window[windowIn - 1].seqNumber + 1)%maxSeqNo;
+            while (!windowFull) {
+                windowReserve(nextSeq);
+                nextSeq++;
+            }
             fwrite(buffer, 1, strlen(buffer), arquivo); //escreve bytes do buffer no arquivo
             byte_count += n; //atualiza contagem de bytes recebidos
         }
@@ -197,7 +216,7 @@ int main(int argc, char**argv) {
             serialize(aux,lastRcvd);
             n = sendto(s,aux,8,0,res->ai_addr,res->ai_addrlen); //envia o nome do arquivo
             while (n==-1) {
-                printf("Erro ao enviar ack.\n");
+                fprintf(stderr,"Erro ao enviar ack.\n");
                 n = sendto(s,aux,8,0,res->ai_addr,res->ai_addrlen);
             }
         }
@@ -211,9 +230,9 @@ int main(int argc, char**argv) {
 
     gettimeofday(&tv1,0); //finaliza a contagem de tempo
     long total = (tv1.tv_sec - tv0.tv_sec)*1000000 + tv1.tv_usec - tv0.tv_usec; //tempo decorrido, em microssegundos
-    printf("\nBuffer: \%5lu byte(s) \%10.2f kbps ( \%lu bytes em \%3u.\%06lu s)", (byte_count*1000000)/(1000*total), byte_count, tv1.tv_sec - tv0.tv_sec, tv1.tv_usec - tv0.tv_usec);
+    fprintf(stderr,"\nBuffer: \%5lu byte(s) \%10.2f kbps ( \%lu bytes em \%3u.\%06lu s)", (byte_count*1000000)/(1000*total), byte_count, tv1.tv_sec - tv0.tv_sec, tv1.tv_usec - tv0.tv_usec);
     arquivo = fopen("resultados.txt","a"); //abre o arquivo para salvar os dados
-    fprintf(arquivo, "\nBuffer: \%5u byte(s) \%10.2f kbps ( \%u bytes em \%3u.\%06u s)", (byte_count*1000000)/(1000*total), byte_count, tv1.tv_sec - tv0.tv_sec, tv1.tv_usec - tv0.tv_usec);
+    ffprintf(stderr,arquivo, "\nBuffer: \%5u byte(s) \%10.2f kbps ( \%u bytes em \%3u.\%06u s)", (byte_count*1000000)/(1000*total), byte_count, tv1.tv_sec - tv0.tv_sec, tv1.tv_usec - tv0.tv_usec);
     fclose(arquivo);
     return 0;
 }

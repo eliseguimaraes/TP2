@@ -16,12 +16,13 @@ Reenvia os não confirmados.
 fim do loop.
 
 Client:
+Guarda espaço na janela para elementos com SeqNumber de 0 a tam_janela - 1: windowReserve
 loop:
 Recebe pacote do server.
 Lê pacote e salva o que recebeu em hash_no, SeqNumber e buffer.
 Faz detecção de erro.
 Buferiza pacotes recebidos corretamente.
 Atualiza janela e lastRcvd (último pacote recebido na ordem correta).
-Desliza janela, se possível.
+Desliza janela, se possível: removeRcvds e windowReserve.
 Envia Ack com número de lastRcvd.
 fim do loop

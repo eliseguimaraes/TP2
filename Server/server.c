@@ -24,17 +24,12 @@ struct sockaddr_in6 cliaddr;
 int windowIn, windowOut;
 struct windowPos *window;
 
-unsigned long hash(unsigned char *str) {
-//gera um hash para uma string, para detecção de erro
-//djb2
-//retrieved from: http://www.cse.yorku.ca/~oz/hash.html
-    unsigned long hash = 5381;
-    int c;
-    while (c = *str++)
-        hash = ((hash << 5) + hash) + c; /* hash * 33 + c */
-    return hash;
+int checksum (char *str) {
+    int i, checkResult = 0;
+    for (i=0; str[i]!='\0'; i++)
+        checkResult += (int)str[i];
+    return checkResult;
 }
-
 
 void windowInit(void) {
     windowIn = windowOut = 0;
@@ -95,7 +90,7 @@ void resendAll () {
     }
 }
 
-void serialize (char *pkt, int seqNumber, unsigned long hash_no, char *buffer) {
+void serialize (char *pkt, int seqNumber, int checkResult, char *buffer) {
     int i, a;
     a = sizeof(int);
     i = 0;
@@ -104,10 +99,10 @@ void serialize (char *pkt, int seqNumber, unsigned long hash_no, char *buffer) {
         pkt[i] = seqNumber >> a*8;
         i++;
     }
-    a = sizeof(unsigned long);
-    while (a) { //serializa o unsigned long
+    a = sizeof(int);
+    while (a) { //serializa o segundo int
         a--;
-        pkt[i] = hash_no >> a*8;
+        pkt[i] = checkResult >> a*8;
         i++;
     }
     a = strlen(buffer);
@@ -116,10 +111,11 @@ void serialize (char *pkt, int seqNumber, unsigned long hash_no, char *buffer) {
         pkt[i] = buffer[a];
         i++;
     }
+    puts(pkt);
     pkt[i] = 0;
 }
 
-void deserialize (char *ack, int *ackNumber, char *buffer) {//"deserializa" o ack
+void deserialize (char *ack, int *ackNumber, char *buffer, int n) {//"deserializa" o ack
     int i, a;
     i = 0;
     *ackNumber = 0;
@@ -129,7 +125,7 @@ void deserialize (char *ack, int *ackNumber, char *buffer) {//"deserializa" o ac
         *ackNumber += ack[i]*pow(8,a);
         i++;
     }
-    a = strlen(ack) - sizeof(int);
+    a = n - sizeof(int);
     buffer[a+1] = 0;
     while(a) {
         a--;
@@ -139,11 +135,10 @@ void deserialize (char *ack, int *ackNumber, char *buffer) {//"deserializa" o ac
 }
 
 int main(int argc, char**argv) {
-    int ret, len, n, byte_count;
+    int ret, len, n, byte_count, checkResult;
     struct addrinfo hints, *res;
     struct timeval tv0, tv1,tv;
     int seqNumber, ackNumber;
-    unsigned long hash_no;
     char received[256], *pkt, aux[4];
     char *buffer;
     FILE *arquivo;
@@ -159,7 +154,7 @@ int main(int argc, char**argv) {
     tam_janela = atoi(argv[3]); //tamanho da janela
     window = (struct windowPos*)malloc(tam_janela*sizeof(struct windowPos)); //aloca janela
     maxSeqNo = 2*tam_janela; //há o dobro de números de sequência que elementos na janela
-    tam_pkt = tam_buffer + sizeof(int) + sizeof(unsigned long);
+    tam_pkt = tam_buffer + 2*sizeof(int);
     pkt = (char*)malloc(tam_pkt);
     windowInit(); //inicializa a janela
 
@@ -206,9 +201,12 @@ int main(int argc, char**argv) {
             while(1) {
                 if(!windowFull()) {
                     if(fread(buffer, 1, tam_buffer+1, arquivo)) {
-                        hash_no = hash(buffer);
-                        serialize(pkt,seqNumber,hash_no,buffer);
-                        n = sendto(s, pkt, strlen(pkt),0, (struct sockaddr *)&cliaddr,sizeof(cliaddr));
+                        puts(buffer);
+                        checkResult = checksum(buffer);
+                        serialize(pkt,seqNumber,checkResult,buffer);
+                        puts(pkt);
+                        while(n = sendto(s, pkt, strlen(pkt),0, (struct sockaddr *)&cliaddr,sizeof(cliaddr))<=0){}
+                        printf("%d  ", n);
                         windowInsert(buffer, pkt, seqNumber);
                         seqNumber = (seqNumber + 1)%maxSeqNo;
                         byte_count += n;
@@ -220,7 +218,7 @@ int main(int argc, char**argv) {
                 }
                 else {
                     received[n] = 0;
-                    deserialize(received,&ackNumber,aux);
+                    deserialize(received,&ackNumber,aux,n);
                     if (strcmp(aux, "ackn")) { //verifica se é ACK
                         acknowledge(ackNumber);//acknowledge
                         while(removeAckds()){}//remove pacotes confirmados da janela
