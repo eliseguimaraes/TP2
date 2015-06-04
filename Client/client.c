@@ -137,7 +137,7 @@ int main(int argc, char**argv) {
     struct timeval tv0, tv1;
     int seqNumber;
     unsigned long hash_no;
-    char *buffer, *pkt, aux[8];
+    char *buffer, *pkt, aux[8], conv[4];
     FILE* arquivo;
 
     if (argc != 6) {
@@ -194,7 +194,12 @@ int main(int argc, char**argv) {
             pkt[n] = 0;
             puts("aqui");
             //fprintf(stderr,"    %d    ", n);
-            deserialize(pkt, &seqNumber,&checkResult,buffer, n);
+            //deserialize(pkt, &seqNumber,&checkResult,buffer, n);
+            strncpy(conv, pkt, 4);
+            seqNumber = ntohl(conv);
+            strncpy(conv,pkt+4,4);
+            checkResult = conv;
+            strcpy(buffer, pkt+8);
             //detecta erros
             if(checkResult != checksum(buffer)) {
                 puts("Erro detectado");

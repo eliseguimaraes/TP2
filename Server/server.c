@@ -135,7 +135,7 @@ void deserialize (char *ack, int *ackNumber, char *buffer, int n) {//"deserializ
 }
 
 int main(int argc, char**argv) {
-    int ret, len, n, byte_count, checkResult;
+    int ret, len, n, byte_count, checkResult, conv;
     struct addrinfo hints, *res;
     struct timeval tv0, tv1,tv;
     int seqNumber, ackNumber;
@@ -203,8 +203,14 @@ int main(int argc, char**argv) {
                     if(fread(buffer, 1, tam_buffer+1, arquivo)) {
                         puts(buffer);
                         checkResult = checksum(buffer);
-                        serialize(pkt,seqNumber,checkResult,buffer);
+                        conv = htonl(seqNumber);
+                        strcpy(pkt, (char*)&conv);
+                        conv = htonl(checkResult);
+                        strcat(pkt, (char*)&conv);
+                        strcat(pkt, buffer);
+                        //serialize(pkt,seqNumber,checkResult,buffer);
                         puts(pkt);
+                        puts(strlen(pkt));
                         while(n = sendto(s, pkt, strlen(pkt),0, (struct sockaddr *)&cliaddr,sizeof(cliaddr))<=0){}
                         printf("%d  ", n);
                         windowInsert(buffer, pkt, seqNumber);
