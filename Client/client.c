@@ -23,6 +23,11 @@ struct sockaddr_in6 cliaddr;
 unsigned int windowIn, windowOut;
 struct windowPos *window;
 
+int mod(int a, int b) { //aritmética modular
+    int r = a % b;
+    return r<0 ? (r+b):r;
+}
+
 void deserialize (unsigned char *pkt, unsigned int *seqNumber, unsigned int *checkResult, char *buffer, unsigned int n) {//não sei se a palavra "deserializar" existe. procurar.
     unsigned int i, a;
     i = 0;
@@ -30,8 +35,8 @@ void deserialize (unsigned char *pkt, unsigned int *seqNumber, unsigned int *che
     *checkResult = 0;
     a = sizeof(unsigned int);
     for (i=0; i<a; i++) {
-        *seqNumber += pkt[i]*pow(256,i);
-        *checkResult += pkt[i+a]*pow(256,i);
+        *seqNumber += (pkt[i]-1)*pow(256,i);
+        *checkResult += (pkt[i+a]-1)*pow(256,i);
     }
     i = 2*sizeof(unsigned int);
     a = n - 2*sizeof(unsigned int);
@@ -49,7 +54,8 @@ void serialize (unsigned char *aux, unsigned int lastRcvd) { //serialização do
     strcpy(string, "ackn");
     a = sizeof(int);
     for (i=0; i<a; i++)  //serializa o inteiro
-        aux[i] = lastRcvd >> 8*i;
+        aux[i] = (lastRcvd) >> 8*i;
+        aux[i]+=1;
     a = strlen(string);
     while (a) { //serializa a string
         a--;
@@ -60,14 +66,16 @@ void serialize (unsigned char *aux, unsigned int lastRcvd) { //serialização do
 }
 
 unsigned int checksum (char *str) {
-    unsigned int i, checkResult = 0;
+    unsigned int i;
+    unsigned int checkResult = 0;
     for (i=0; str[i]!='\0'; i++)
-        checkResult += (int)str[i];
+        checkResult += (unsigned int)str[i];
+    return checkResult;
 }
 
 
 int windowFull(void) {
-    if (windowIn == ((windowOut - 1 + tam_janela)%tam_janela))
+    if (windowIn == mod((windowOut - 1 + tam_janela),tam_janela))
         return 1; //janela cheia
     else return 0;
 }
@@ -83,7 +91,7 @@ void windowReserve (unsigned int seqNumber) { //cria espaços na janela para buf
         window[windowIn].pkt = (char*)malloc(tam_pkt);
         window[windowIn].seqNumber = seqNumber;
         window[windowIn].Rcvd = 0;
-        windowIn = (windowIn + 1)%tam_janela;
+        windowIn = mod((windowIn + 1),tam_janela);
         windowRoom++;
 }
 
@@ -100,7 +108,7 @@ void windowInit ()  { //inicializa a janela
 
 void windowStore (char *buffer, char *pkt, unsigned int seqNumber) {
         int num;
-        num = (seqNumber - window[windowOut].seqNumber)%maxSeqNo;
+        num = mod((seqNumber - window[windowOut].seqNumber),maxSeqNo);
         if (num < tam_janela) {
             strcpy(window[windowOut + num].buffer,buffer);
             strcpy(window[windowOut + num].pkt,pkt);
@@ -113,12 +121,11 @@ int removeRcvds (void) {
         free(window[windowOut].buffer);
         free(window[windowOut].pkt);
         lastRcvd = window[windowOut].seqNumber;
-        windowOut = (windowOut + 1)%tam_janela;
+        windowOut = mod((windowOut + 1),tam_janela);
         return 1;
     }
     else return 0;
 }
-
 
 int main(int argc, char**argv) {
     int n,ret, byte_count;
@@ -136,6 +143,7 @@ int main(int argc, char**argv) {
     tam_janela = atoi(argv[5]);
     tam_buffer = atoi(argv[4]);
     lastRcvd = -1; //nada foi recebido ainda
+    maxSeqNo = 2*tam_janela; //há o dobro de números de sequência que posições na janela
     window = (struct windowPos*)malloc(tam_janela*sizeof(struct windowPos));
     buffer = (char*)malloc(tam_buffer*sizeof(char));
     tam_pkt = tam_buffer + 2*sizeof(int);
@@ -177,17 +185,18 @@ int main(int argc, char**argv) {
     windowInit();
     while (1) {
         if (windowRoom) {
-            fprintf(stderr,"%d", windowRoom);
-            while(n = recvfrom(s,pkt,tam_pkt,0,NULL,NULL)<=0) {}//recebe mensagem do server + cabeçalho UDP
+            n = recvfrom(s,pkt,tam_pkt,0,NULL,NULL);
+            while (n<0) {
+                n = recvfrom(s,pkt,tam_pkt,0,NULL,NULL);
+            }
             pkt[n] = 0;
-            puts("aqui");
             //fprintf(stderr,"    %d    ", n);
-            //deserialize(pkt, &seqNumber,&checkResult,buffer, n);
-            strncpy(conv, pkt, 4);
+            deserialize(pkt, &seqNumber,&checkResult,buffer, n);
+            /*strncpy(conv, pkt, 4);
             seqNumber = ntohl(conv);
             strncpy(conv,pkt+4,4);
             checkResult = conv;
-            strcpy(buffer, pkt+8);
+            strcpy(buffer, pkt+8);*/
             //detecta erros
             if(checkResult != checksum(buffer)) {
                 puts("Erro detectado");
@@ -196,15 +205,16 @@ int main(int argc, char**argv) {
             //buferiza
             windowStore(buffer, pkt, seqNumber);
             while(removeRcvds());
-            nextSeq = (window[windowIn - 1].seqNumber + 1)%maxSeqNo;
+            nextSeq = mod((window[mod((windowIn - 1),tam_janela)].seqNumber + 1),maxSeqNo);
             while (!windowFull) {
                 windowReserve(nextSeq);
                 nextSeq++;
             }
+            fprintf(stderr,"\nPacote %d recebido e salvo no arquivo!\n",seqNumber);
             fwrite(buffer, 1, strlen(buffer), arquivo); //escreve bytes do buffer no arquivo
             byte_count += n; //atualiza contagem de bytes recebidos
         }
-        //envia ack do último recevido em ordem
+        //envia ack do último recebido em ordem
         if (lastRcvd >= 0) {
             serialize(aux,lastRcvd);
             n = sendto(s,aux,8,0,res->ai_addr,res->ai_addrlen); //envia o nome do arquivo
@@ -212,6 +222,7 @@ int main(int argc, char**argv) {
                 fprintf(stderr,"Erro ao enviar ack.\n");
                 n = sendto(s,aux,8,0,res->ai_addr,res->ai_addrlen);
             }
+            fprintf(stderr,"Ack %d enviado, de tamanho %d",lastRcvd,n);
         }
     }
 
