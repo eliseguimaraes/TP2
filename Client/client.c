@@ -10,68 +10,57 @@
 #include <math.h>
 
 struct windowPos {
-    int seqNumber;
+    unsigned int seqNumber;
     int Rcvd;
     char *buffer;
     char *pkt;
 };
 
-int s, tam_buffer, tam_janela, tam_pkt, windowRoom;
-int maxSeqNo, lastRcvd;
+int s;
+unsigned int tam_buffer, tam_janela, tam_pkt, windowRoom;
+unsigned int maxSeqNo, lastRcvd;
 struct sockaddr_in6 cliaddr;
-int windowIn, windowOut;
+unsigned int windowIn, windowOut;
 struct windowPos *window;
 
-void deserialize (char *pkt, int *seqNumber, int *checkResult, char *buffer, int n) {//não sei se a palavra "deserializar" existe. procurar.
-    int i, a;
+void deserialize (unsigned char *pkt, unsigned int *seqNumber, unsigned int *checkResult, char *buffer, unsigned int n) {//não sei se a palavra "deserializar" existe. procurar.
+    unsigned int i, a;
     i = 0;
     *seqNumber = 0;
     *checkResult = 0;
-    a = sizeof(int);
-    while (a) {
-        a--;
-        *seqNumber += pkt[i]*pow(8,a);
-        i++;
-
+    a = sizeof(unsigned int);
+    for (i=0; i<a; i++) {
+        *seqNumber += pkt[i]*pow(256,i);
+        *checkResult += pkt[i+a]*pow(256,i);
     }
-    a = sizeof(int);
-    while (a) {
-        a--;
-        *checkResult += pkt[i]*pow(8,a);
-        i++;
-    }
-    a = n - 2*sizeof(int);
-    fprintf(stderr,"%d",a);
-    buffer[a+1] = 0;
+    i = 2*sizeof(unsigned int);
+    a = n - 2*sizeof(unsigned int);
+    buffer[a] = 0;
     while(a) {
         a--;
-        buffer[a] = pkt[i];
+        buffer[i-8] = pkt[i];
         i++;
     }
 }
 
-void serialize (char *aux, int lastRcvd) { //serialização dos acks
-    int i, a;
-    char string[4];
+void serialize (unsigned char *aux, unsigned int lastRcvd) { //serialização dos acks
+    unsigned int i, a;
+    unsigned char string[4];
     strcpy(string, "ackn");
     a = sizeof(int);
-    i = 0;
-    while (a) { //serializa o inteiro
-        a--;
-        aux[i] = lastRcvd >> a*8;
-        i++;
-    }
+    for (i=0; i<a; i++)  //serializa o inteiro
+        aux[i] = lastRcvd >> 8*i;
     a = strlen(string);
     while (a) { //serializa a string
         a--;
-        aux[i] = string[a];
+        aux[i] = string[i-4];
         i++;
     }
     aux[i] = 0;
 }
 
-int checksum (char *str) {
-    int i, checkResult = 0;
+unsigned int checksum (char *str) {
+    unsigned int i, checkResult = 0;
     for (i=0; str[i]!='\0'; i++)
         checkResult += (int)str[i];
 }
@@ -89,7 +78,7 @@ int windowEmpty (void) {
     else return 0;
 }
 
-void windowReserve (int seqNumber) { //cria espaços na janela para buferizar novos elementos
+void windowReserve (unsigned int seqNumber) { //cria espaços na janela para buferizar novos elementos
         window[windowIn].buffer = (char*)malloc(tam_buffer);
         window[windowIn].pkt = (char*)malloc(tam_pkt);
         window[windowIn].seqNumber = seqNumber;
@@ -102,14 +91,14 @@ void windowReserve (int seqNumber) { //cria espaços na janela para buferizar no
 void windowInit ()  { //inicializa a janela
     windowIn = 0;
     windowOut = 0;
-    int i;
+    unsigned int i;
     for (i=0; i<tam_janela; i++)
         windowReserve(i);
 
     windowRoom = tam_janela;
 }
 
-void windowStore (char *buffer, char *pkt, int seqNumber) {
+void windowStore (char *buffer, char *pkt, unsigned int seqNumber) {
         int num;
         num = (seqNumber - window[windowOut].seqNumber)%maxSeqNo;
         if (num < tam_janela) {
@@ -132,11 +121,10 @@ int removeRcvds (void) {
 
 
 int main(int argc, char**argv) {
-    int n,ret, byte_count, nextSeq, checkResult;
+    int n,ret, byte_count;
+    unsigned int nextSeq, checkResult, seqNumber;
     struct addrinfo hints, *res = NULL;
     struct timeval tv0, tv1;
-    int seqNumber;
-    unsigned long hash_no;
     char *buffer, *pkt, aux[8], conv[4];
     FILE* arquivo;
 

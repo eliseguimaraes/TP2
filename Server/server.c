@@ -12,22 +12,23 @@
 #define TIMEOUT_MS 1000 //timeout de um segundo
 
 struct windowPos {
-    int seqNumber;
+    unsigned int seqNumber;
     int AckRcvd;
     char *buffer;
     char *pkt;
 };
 
-int s,tam_buffer, tam_janela, tam_pkt;
-int maxSeqNo;
+int s;
+unsigned int tam_buffer, tam_janela, tam_pkt;
+unsigned int maxSeqNo, windowIn, windowOut;
 struct sockaddr_in6 cliaddr;
-int windowIn, windowOut;
 struct windowPos *window;
 
-int checksum (char *str) {
-    int i, checkResult = 0;
+unsigned int checksum (char *str) {
+    unsigned int i;
+    unsigned int checkResult = 0;
     for (i=0; str[i]!='\0'; i++)
-        checkResult += (int)str[i];
+        checkResult += (unsigned int)str[i];
     return checkResult;
 }
 
@@ -47,7 +48,7 @@ int windowEmpty (void) {
     else return 0;
 }
 
-void windowInsert (char *buffer, char* pkt, int seqNumber) {
+void windowInsert (char *buffer, char* pkt, unsigned int seqNumber) {
     window[windowIn].buffer = (char*)malloc(tam_buffer);
     window[windowIn].pkt = (char*)malloc(tam_pkt);
     window[windowIn].seqNumber = seqNumber;
@@ -66,7 +67,7 @@ int removeAckds (void) {
     }
     else return 0;
 }
-void acknowledge (int seqNumber) { //número do ack representa que todos os pacotes antes desse chegaram na ordem
+void acknowledge (unsigned int seqNumber) { //número do ack representa que todos os pacotes antes desse chegaram na ordem
     int num, i;
     num = (seqNumber - window[windowOut].seqNumber)%maxSeqNo; //distância até o número do ack
     if (num<tam_janela) { //se ainda está na janela
@@ -76,69 +77,61 @@ void acknowledge (int seqNumber) { //número do ack representa que todos os paco
     }
 }
 
-void resend (int seqNumber) {
+void resend (unsigned int seqNumber) {
         int num;
         num = (seqNumber - window[windowOut].seqNumber)%tam_janela;
         sendto(s, (window+windowOut + num)->pkt, strlen((window+windowOut + num)->pkt),0, (struct sockaddr *)&cliaddr,sizeof(cliaddr));
 }
 
 void resendAll () {
-    int i = windowOut;
+    unsigned int i = windowOut;
     while (i!=windowIn) {
         sendto(s, window[i].pkt, strlen(window[i].pkt),0, (struct sockaddr *)&cliaddr,sizeof(cliaddr));
         i = (i+1)%tam_janela;
     }
 }
 
-void serialize (char *pkt, int seqNumber, int checkResult, char *buffer) {
-    int i, a;
-    a = sizeof(int);
+void serialize (unsigned char *pkt, unsigned int seqNumber, unsigned int checkResult, char *buffer) {
+    unsigned int i, a;
     i = 0;
-    while (a) { //serializa o inteiro
-        a--;
-        pkt[i] = seqNumber >> a*8;
-        i++;
+    a = sizeof(unsigned int);
+    for (i=0; i<a; i++) { //serializa os dois inteiros
+        pkt[i] = seqNumber >> 8*i;
+        pkt[i+a] = checkResult >> 8*i;
     }
-    a = sizeof(int);
-    while (a) { //serializa o segundo int
-        a--;
-        pkt[i] = checkResult >> a*8;
-        i++;
-    }
+    i = 2*sizeof(unsigned int);
     a = strlen(buffer);
     while (a) { //serializa a string
         a--;
-        pkt[i] = buffer[a];
+        pkt[i] = buffer[i-8];
         i++;
     }
-    puts(pkt);
     pkt[i] = 0;
 }
 
-void deserialize (char *ack, int *ackNumber, char *buffer, int n) {//"deserializa" o ack
+void deserialize (unsigned char *ack, unsigned int *ackNumber, unsigned char *buffer, unsigned int n) {//"deserializa" o ack
     int i, a;
     i = 0;
     *ackNumber = 0;
     a = sizeof(int);
-    while (a) {
-        a--;
-        *ackNumber += ack[i]*pow(8,a);
-        i++;
+    for (i=0; i<a; i++) {
+        *achNumber += ack[i]*pow(256,i);
     }
     a = n - sizeof(int);
-    buffer[a+1] = 0;
+    buffer[a] = 0;
     while(a) {
         a--;
-        buffer[a] = ack[i];
+        buffer[i-4] = ack[i];
         i++;
     }
 }
 
 int main(int argc, char**argv) {
-    int ret, len, n, byte_count, checkResult, conv;
+    int ret, len, conv;
+    unsigned int checkResult, n, byte_count;
     struct addrinfo hints, *res;
     struct timeval tv0, tv1,tv;
-    int seqNumber, ackNumber;
+    unsigned int seqNumber, ackNumber;
     char received[256], *pkt, aux[4];
     char *buffer;
     FILE *arquivo;
