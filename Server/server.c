@@ -9,7 +9,8 @@
 #include <stdlib.h>
 #include <math.h>
 
-#define TIMEOUT_MS 1000 //timeout de um segundo
+#define TIMEOUT_MS 0 //timeout milissegundos
+#define TIMEOUT_S 1 //timeout segundos
 
 struct windowPos {
     unsigned int seqNumber;
@@ -21,7 +22,6 @@ struct windowPos {
 int s;
 unsigned int tam_buffer, tam_janela, tam_pkt;
 unsigned int maxSeqNo, windowIn, windowOut;
-struct sockaddr_in6 cliaddr;
 struct windowPos *window;
 
 int mod(int a, int b) { //aritmética modular
@@ -42,8 +42,10 @@ void windowInit(void) {
 }
 
 int windowFull(void) {
-    if (windowIn == mod((windowOut - 1 + tam_janela),tam_janela))
+    if (windowIn == mod((windowOut - 1 + tam_janela),tam_janela)) {
+        fprintf(stderr,"\nEntrada da janela: %d Saida da janela: %d\n",windowIn, windowOut);
         return 1; //janela cheia
+    }
     else return 0;
 }
 
@@ -67,6 +69,8 @@ int removeAckds (void) {
     if (window[windowOut].AckRcvd) {
         free(window[windowOut].buffer);
         free(window[windowOut].pkt);
+        window[windowOut].AckRcvd = 0;
+        fprintf(stderr,"\nPacote %d confirmado e removido do buffer.\n",window[windowOut].seqNumber);
         windowOut = mod((windowOut + 1),tam_janela);
         return 1;
     }
@@ -82,17 +86,12 @@ void acknowledge (unsigned int seqNumber) { //número do ack representa que todo
     }
 }
 
-void resend (unsigned int seqNumber) {
-        int num;
-        num = mod((seqNumber - window[windowOut].seqNumber),tam_janela);
-        sendto(s, (window+windowOut + num)->pkt, strlen((window+windowOut + num)->pkt),0, (struct sockaddr *)&cliaddr,sizeof(cliaddr));
-}
-
-void resendAll () {
+void resendAll (struct sockaddr_in6 *cliaddr) {
     unsigned int i = windowOut;
     while (i!=windowIn) {
-        sendto(s, window[i].pkt, strlen(window[i].pkt),0, (struct sockaddr *)&cliaddr,sizeof(cliaddr));
-        i = (i+1)%tam_janela;
+        sendto(s, window[i].pkt, strlen(window[i].pkt),0, (struct sockaddr *)cliaddr,sizeof(cliaddr));
+        fprintf(stderr,"\nPacote %u reenviado\n",window[i].seqNumber);
+        i = mod((i+1),tam_janela);
     }
 }
 
@@ -116,7 +115,7 @@ void serialize (unsigned char *pkt, unsigned int seqNumber, unsigned int checkRe
     pkt[i] = '\0';
 }
 
-void deserialize (unsigned char *ack, unsigned int *ackNumber, unsigned char *buffer, unsigned int n) {//"deserializa" o ack
+void deserializeAck (unsigned char *ack, unsigned int *ackNumber, unsigned char *buffer, unsigned int n) {//"deserializa" o ack
     int i, a;
     i = 0;
     *ackNumber = 0;
@@ -134,10 +133,11 @@ void deserialize (unsigned char *ack, unsigned int *ackNumber, unsigned char *bu
 }
 
 int main(int argc, char**argv) {
-    int ret, len, conv, fim;
-    unsigned int checkResult, n, byte_count;
+    int ret, len, fim,ack,flag, timeout,n;
+    unsigned int checkResult, byte_count;
     struct addrinfo hints, *res;
     struct timeval tv0, tv1,tv;
+    struct sockaddr_in6 cliaddr;
     unsigned int seqNumber, ackNumber;
     char received[256], *pkt, aux[4];
     char *buffer;
@@ -174,8 +174,8 @@ int main(int argc, char**argv) {
     s=socket(res->ai_family,SOCK_DGRAM,0);
     puts("socket criado.\n");
     //setando o timeout no socket
-    tv.tv_sec = TIMEOUT_MS/1000;
-    tv.tv_usec = 0;
+    tv.tv_sec = TIMEOUT_S;
+    tv.tv_usec = TIMEOUT_MS;
     if (setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, &tv,sizeof(tv))<0) {
         perror("Error");
     }
@@ -187,9 +187,13 @@ int main(int argc, char**argv) {
     while (1) {
         len=sizeof(cliaddr);
         //if ((child = fork())==0) { //caso seja processo filho
-         //   close(s);
+        //    close(s);
             gettimeofday(&tv0,0);//inicia a contagem de tempo
-            while (n = recvfrom(s,received,sizeof(received),0,(struct sockaddr *)&cliaddr, &len) < 0) {}
+            n = recvfrom(s,received,sizeof(received),0,(struct sockaddr *)&cliaddr, &len);
+            while (n < 0) {
+                n = recvfrom(s,received,sizeof(received),0,(struct sockaddr *)&cliaddr, &len);
+            }
+            received[n] = 0;
             puts(received);
             arquivo = fopen(received, "r");
             if (arquivo == NULL) {
@@ -199,60 +203,76 @@ int main(int argc, char**argv) {
             byte_count = 0; //inicia contagem de bytes enviados
             seqNumber = 0;
             fim = 0; //marca o fim do arquivo
-            while(!fim && !windowEmpty()) { //enquanto o arquivo não tiver chegado ao fim e todos os acks não tiverem sido recebidos
-                while(!windowFull()) {
-                    if(fread(buffer, 1, tam_buffer, arquivo)) {
-                        checkResult = checksum(buffer);
-                        /*conv = htonl(seqNumber);
-                        strcpy(pkt, (char*)&conv);
-                        conv = htonl(checkResult);
-                        strcat(pkt, (char*)&conv);
-                        strcat(pkt, buffer);*/
-                        serialize(pkt,seqNumber,checkResult,buffer);
-                        n = sendto(s, pkt, strlen(pkt),0, (struct sockaddr *)&cliaddr,sizeof(cliaddr)); //envia o pacote
-                        while (n==-1) { //reenvia em caso de erro
-                            n = sendto(s, pkt, strlen(pkt),0, (struct sockaddr *)&cliaddr,sizeof(cliaddr));
+            while(!fim || !windowEmpty()) { //enquanto o arquivo não tiver chegado ao fim e todos os acks não tiverem sido recebidos
+                if (!fim) {
+                    while(!windowFull()) {
+                        if(n=fread(buffer, 1, tam_buffer, arquivo)) {
+                            buffer[n]=0;
+                            checkResult = checksum(buffer);
+                            serialize(pkt,seqNumber,checkResult,buffer);
+                            n = sendto(s, pkt, strlen(pkt),0, (struct sockaddr *)&cliaddr,sizeof(cliaddr)); //envia o pacote
+                            while (n==-1) { //reenvia em caso de erro
+                                n = sendto(s, pkt, strlen(pkt),0, (struct sockaddr *)&cliaddr,sizeof(cliaddr));
+                            }
+                            windowInsert(buffer, pkt, seqNumber); //buferiza o que acabou de enviar
+                            fprintf(stderr,"\nPacote %d, conteúdo '%s', enviado e buferizado!\n", seqNumber,buffer);
+                            seqNumber = mod((seqNumber + 1),maxSeqNo);
+                            byte_count += n;
                         }
-                        fprintf(stderr,"\nPacote %d enviado!\n", seqNumber);
-                        windowInsert(buffer, pkt, seqNumber); //buferiza o que acabou de enviar
-                        seqNumber = mod((seqNumber + 1),maxSeqNo);
-                        byte_count += n;
-                    }
-                    else {
-                        fim = 1;
-                        break; //fim do arquivo
-                    }
-                }
-                while(1) {
-                    n = recvfrom(s,received,4+sizeof(int),0,(struct sockaddr *)&cliaddr, &len); //recebe potenciais acks
-                    if(n<=0) { //erro
-                        if (errno == EAGAIN || errno == EWOULDBLOCK) {//timeout
-                            puts("timeout");
-                            resendAll(); //timeout
+                        else {
+                            puts("Fim do arquivo.");
+                            fclose(arquivo); //fecha o arquivo
+                            fim = 1;
                             break;
                         }
-                        else
-                            perror("Erro no recebimento");
-                        //caso não tenha dado timeout, continuar iterando
                     }
-                    else {
-                        received[n] = 0;
-                        deserialize(received,&ackNumber,aux,n);
-                        if (strcmp(aux, "ackn")) { //verifica se é ACK
-                            acknowledge(ackNumber);//acknowledge
-                            fprintf(stderr,"\nAck %d recebido!\n",ackNumber);
-                            while(removeAckds()){}//remove pacotes confirmados da janela
+                }
+                if (windowFull()&&!fim) puts("Janela cheia. Á espera de acks para enviar mais pacotes...");
+                if (!windowEmpty()) { //se a janela já estiver vazia, não há necessidade de se esperarem mais acks
+                    ack = 0;
+                    timeout = 0;
+                    while(!ack&&!timeout) {
+                        n = recvfrom(s,received,4+sizeof(int),0,(struct sockaddr *)&cliaddr, &len); //recebe potenciais acks
+                        if(n<=0) { //erro
+                            puts("erro");
+                            if (errno == EAGAIN || errno == EWOULDBLOCK) {//timeout
+                                perror("Timeout: ");
+                                puts("Reenviando todos os pacotes não confirmados.");
+                                timeout = 1;
+                                resendAll(&cliaddr); //timeout
+                            }
+                            else {
+                                perror("Erro no recebimento");
+                            //caso não tenha dado timeout, continuar iterando
+                            }
                         }
-                        break;
+                        else {
+                            puts("ack?");
+                            received[n] = 0;
+                            deserializeAck(received,&ackNumber,aux,n);
+                            if (!strcmp(aux, "ackn")) { //verifica se é ACK
+                                puts("ack!");
+                                ack = 1;
+                                acknowledge(ackNumber);//acknowledge
+                                fprintf(stderr,"\nAck %d recebido!\n",ackNumber);
+                                flag = 0;
+                                while(removeAckds()){
+                                    flag++;
+                                }//remove pacotes confirmados da janela
+                                fprintf(stderr,"\n%d espaço(s) liberado(s) na janela!\n",flag);
+                            }
+                        }
                     }
                 }
             }
-
-            fclose(arquivo);
+            strcpy(buffer,"fim");//buffer vazio indica o fim do arquivo
+            checkResult = checksum(buffer);
+            serialize(pkt,seqNumber,checkResult,buffer);
+            n = sendto(s, pkt, strlen(pkt),0, (struct sockaddr *)&cliaddr,sizeof(cliaddr)); //envia o pacote
             gettimeofday(&tv1,0);//encera a contagem de tempo
             long total = (tv1.tv_sec - tv0.tv_sec)*1000000 + tv1.tv_usec - tv0.tv_usec; //tempo decorrido, em microssegundos
             printf("\nDesempenho: \nBytes enviados: %d \nTempo decorrido (microssegundos): %ld\nThroughput: %f bytes/segundo\n", byte_count, total, (float)byte_count*1000000/total);
-     //   }
+    //    }
     }
 
     return 0;

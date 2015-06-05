@@ -48,21 +48,22 @@ void deserialize (unsigned char *pkt, unsigned int *seqNumber, unsigned int *che
     }
 }
 
-void serialize (unsigned char *aux, unsigned int lastRcvd) { //serialização dos acks
+void serializeAck (unsigned char *ack, unsigned int lastRcvd) { //serialização dos acks
     unsigned int i, a;
     unsigned char string[4];
     strcpy(string, "ackn");
     a = sizeof(int);
-    for (i=0; i<a; i++)  //serializa o inteiro
-        aux[i] = (lastRcvd) >> 8*i;
-        aux[i]+=1;
+    for (i=0; i<a; i++)  {//serializa o inteiro
+        ack[i] = (lastRcvd) >> 8*i;
+        ack[i]+=1;
+    }
     a = strlen(string);
     while (a) { //serializa a string
         a--;
-        aux[i] = string[i-4];
+        ack[i] = string[i-4];
         i++;
     }
-    aux[i] = 0;
+    ack[i] = 0;
 }
 
 unsigned int checksum (char *str) {
@@ -132,7 +133,7 @@ int main(int argc, char**argv) {
     unsigned int nextSeq, checkResult, seqNumber;
     struct addrinfo hints, *res = NULL;
     struct timeval tv0, tv1;
-    char *buffer, *pkt, aux[8], conv[4];
+    char *buffer, *pkt, ack[8], conv[4];
     FILE* arquivo;
 
     if (argc != 6) {
@@ -168,6 +169,7 @@ int main(int argc, char**argv) {
     puts("socket criado\n");
 
     n = sendto(s,argv[3], strlen(argv[3]),0,res->ai_addr,res->ai_addrlen); //envia o nome do arquivo
+    fprintf(stderr,"\nNome de arquivo enviado: %s\n",argv[3]);
 
     while (n==-1) {
         fprintf(stderr,"Erro ao enviar mensagem.\n");
@@ -190,53 +192,52 @@ int main(int argc, char**argv) {
                 n = recvfrom(s,pkt,tam_pkt,0,NULL,NULL);
             }
             pkt[n] = 0;
-            //fprintf(stderr,"    %d    ", n);
             deserialize(pkt, &seqNumber,&checkResult,buffer, n);
-            /*strncpy(conv, pkt, 4);
-            seqNumber = ntohl(conv);
-            strncpy(conv,pkt+4,4);
-            checkResult = conv;
-            strcpy(buffer, pkt+8);*/
             //detecta erros
             if(checkResult != checksum(buffer)) {
                 puts("Erro detectado");
                 continue; //se detectou erro, salta para a próxima iteração
             }
+            if (!strcmp(buffer, "fim")) {
+                puts("Fim do arquivo");
+                    fclose(arquivo);
+                    free(buffer);
+                    free(pkt);
+
+                    close(s); //encerra a conexão
+
+                    gettimeofday(&tv1,0); //finaliza a contagem de tempo
+                    long total = (tv1.tv_sec - tv0.tv_sec)*1000000 + tv1.tv_usec - tv0.tv_usec; //tempo decorrido, em microssegundos
+                    fprintf(stderr,"\nBuffer: \%5lu byte(s) \%10.2f kbps ( \%lu bytes em \%3u.\%06lu s)", (byte_count*1000000)/(1000*total), byte_count, tv1.tv_sec - tv0.tv_sec, tv1.tv_usec - tv0.tv_usec);
+                    arquivo = fopen("resultados.txt","a"); //abre o arquivo para salvar os dados
+                    fprintf(arquivo, "\nBuffer: \%5u byte(s) \%10.2f kbps ( \%u bytes em \%3u.\%06u s)", (byte_count*1000000)/(1000*total), byte_count, tv1.tv_sec - tv0.tv_sec, tv1.tv_usec - tv0.tv_usec);
+                    fclose(arquivo);
+                    return 0;
+            }
             //buferiza
             windowStore(buffer, pkt, seqNumber);
-            while(removeRcvds());
+            while(removeRcvds()){}
             nextSeq = mod((window[mod((windowIn - 1),tam_janela)].seqNumber + 1),maxSeqNo);
-            while (!windowFull) {
+            while (!windowFull()) {
                 windowReserve(nextSeq);
                 nextSeq++;
             }
-            fprintf(stderr,"\nPacote %d recebido e salvo no arquivo!\n",seqNumber);
+            fprintf(stderr,"\nPacote %d recebido!",seqNumber);
             fwrite(buffer, 1, strlen(buffer), arquivo); //escreve bytes do buffer no arquivo
+            fprintf(stderr,"\n'%s' escrito no arquivo\n",buffer);
             byte_count += n; //atualiza contagem de bytes recebidos
         }
+        else puts("Janela cheia. Aguardando pacotes em ordem...");
         //envia ack do último recebido em ordem
         if (lastRcvd >= 0) {
-            serialize(aux,lastRcvd);
-            n = sendto(s,aux,8,0,res->ai_addr,res->ai_addrlen); //envia o nome do arquivo
+            serializeAck(ack,lastRcvd); //cria o pacote do ack
+            n = sendto(s,ack,8,0,res->ai_addr,res->ai_addrlen); //envia o nome do arquivo
             while (n==-1) {
                 fprintf(stderr,"Erro ao enviar ack.\n");
-                n = sendto(s,aux,8,0,res->ai_addr,res->ai_addrlen);
+                n = sendto(s,ack,8,0,res->ai_addr,res->ai_addrlen);
             }
-            fprintf(stderr,"Ack %d enviado, de tamanho %d",lastRcvd,n);
+            fprintf(stderr,"Ack %d enviado!",lastRcvd,n);
         }
     }
-
-    fclose(arquivo);
-    free(buffer);
-    free(pkt);
-
-    close(s); //encerra a conexão
-
-    gettimeofday(&tv1,0); //finaliza a contagem de tempo
-    long total = (tv1.tv_sec - tv0.tv_sec)*1000000 + tv1.tv_usec - tv0.tv_usec; //tempo decorrido, em microssegundos
-    fprintf(stderr,"\nBuffer: \%5lu byte(s) \%10.2f kbps ( \%lu bytes em \%3u.\%06lu s)", (byte_count*1000000)/(1000*total), byte_count, tv1.tv_sec - tv0.tv_sec, tv1.tv_usec - tv0.tv_usec);
-    arquivo = fopen("resultados.txt","a"); //abre o arquivo para salvar os dados
-    ffprintf(stderr,arquivo, "\nBuffer: \%5u byte(s) \%10.2f kbps ( \%u bytes em \%3u.\%06u s)", (byte_count*1000000)/(1000*total), byte_count, tv1.tv_sec - tv0.tv_sec, tv1.tv_usec - tv0.tv_usec);
-    fclose(arquivo);
     return 0;
 }
