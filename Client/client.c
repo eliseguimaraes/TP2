@@ -88,8 +88,6 @@ int windowEmpty (void) {
 }
 
 void windowReserve (unsigned int seqNumber) { //cria espaços na janela para buferizar novos elementos
-        window[windowIn].buffer = (char*)malloc(tam_buffer);
-        window[windowIn].pkt = (char*)malloc(tam_pkt);
         window[windowIn].seqNumber = seqNumber;
         window[windowIn].Rcvd = 0;
         windowIn = mod((windowIn + 1),tam_janela);
@@ -111,6 +109,8 @@ void windowStore (char *buffer, char *pkt, unsigned int seqNumber) {
         int num;
         num = mod((seqNumber - window[windowOut].seqNumber),maxSeqNo);
         if (num < tam_janela) {
+            window[windowOut+num].buffer = (char*)malloc(tam_buffer);
+            window[windowOut+num].pkt = (char*)malloc(tam_pkt);
             strcpy(window[windowOut + num].buffer,buffer);
             strcpy(window[windowOut + num].pkt,pkt);
             window[windowOut + num].Rcvd = 1;
@@ -131,7 +131,7 @@ int removeRcvds (void) {
 int main(int argc, char**argv) {
     int n,ret,i;
     unsigned int nextSeq, checkResult, seqNumber;
-    unsigned long buffer_total = 0,byte_count;
+    unsigned long buffer_total,byte_count;
     so_addr servaddr;
     struct timeval tv0, tv1;
     char *buffer, *pkt, ack[8],*fileName;
@@ -172,12 +172,12 @@ int main(int argc, char**argv) {
     fileName[1] = '\0';
     strcat(fileName,argv[3]);
     n = tp_sendto(s,fileName, strlen(fileName),&servaddr); //envia o nome do arquivo
-    fprintf(stderr,"\nNome de arquivo enviado: %s\n",argv[3]);
-
     while (n==-1) {
         fprintf(stderr,"Erro ao enviar mensagem.\n");
-        n = tp_sendto(s,argv[3], strlen(argv[3]),&servaddr);
+        n = tp_sendto(s,fileName, strlen(fileName),&servaddr);
     }
+    free(fileName);
+    fprintf(stderr,"\nArquivo solicitado: %s\n",argv[3]);
 
     //abre o arquivo que vai ser gravado
     arquivo = fopen(argv[3],"w+");
@@ -187,18 +187,19 @@ int main(int argc, char**argv) {
     }
     //loop recebe o arquivo buffer a buffer até o fim
     byte_count = 0; //início da contagem de bytes recebidos
+    buffer_total = 0;
     windowInit();
     while (1) {
         if (windowRoom) {
             n = tp_recvfrom(s,pkt,tam_pkt,NULL);
-            while (n<0) {
+            while (n<8) {
                 n = tp_recvfrom(s,pkt,tam_pkt,NULL);
             }
             pkt[n] = 0;
             deserialize(pkt, &seqNumber,&checkResult,buffer, n);
-            //detecta erros
 	        buffer_total += strlen(buffer);
-            if(checkResult != checksum(buffer)) {
+	        printf("\nBytes recebidos até o momento: %lu.\n",buffer_total);
+            if(checkResult != checksum(buffer)) {//detecta erros
                 puts("Erro detectado");
                 continue; //se detectou erro, salta para a próxima iteração
             }
@@ -207,14 +208,13 @@ int main(int argc, char**argv) {
                     fclose(arquivo);
                     free(buffer);
                     free(pkt);
-
+                    free(window);
                     close(s); //encerra a conexão
-
                     gettimeofday(&tv1,0); //finaliza a contagem de tempo
                     long total = (tv1.tv_sec - tv0.tv_sec)*1000000 + tv1.tv_usec - tv0.tv_usec; //tempo decorrido, em microssegundos
-                    fprintf(stderr,"\nTamanho do arquivo: \%5lu bytes Tamanho do buffer: \%5lu byte(s) \%10.2f kbps ( \%lu bytes em \%3u.\%06lu s)\n", buffer_total,tam_buffer,(double)(byte_count*1000000)/(double)(1000*total), byte_count, (unsigned int)(tv1.tv_sec - tv0.tv_sec), tv1.tv_usec - tv0.tv_usec);
+                    fprintf(stderr,"\nTamanho do arquivo: \%5lu bytes Tamanho do buffer: \%5lu byte(s) Tamanho da janela: \%d \%10.2f kbps ( \%lu bytes em \%3u.\%06lu s)\n", buffer_total,tam_buffer,tam_janela,(double)(byte_count*1000000)/(double)(1000*total), byte_count, (unsigned int)(tv1.tv_sec - tv0.tv_sec), tv1.tv_usec - tv0.tv_usec);
                     arquivo = fopen("resultados.txt","a"); //abre o arquivo para salvar os dados
-                    fprintf(arquivo,"\nTamanho do arquivo: \%5lu bytes Tamanho do buffer: \%5lu byte(s) \%10.2f kbps ( \%lu bytes em \%3u.\%06lu s)", buffer_total,tam_buffer,(double)(byte_count*1000000)/(double)(1000*total), byte_count, (unsigned int)(tv1.tv_sec - tv0.tv_sec), tv1.tv_usec - tv0.tv_usec);
+                    fprintf(arquivo,"\nTamanho do arquivo: \%5lu bytes Tamanho do buffer: \%5lu byte(s) Tamanho da janela: \%d \%10.2f kbps ( \%lu bytes em \%3u.\%06lu s)", buffer_total,tam_buffer,tam_janela,(double)(byte_count*1000000)/(double)(1000*total), byte_count, (unsigned int)(tv1.tv_sec - tv0.tv_sec), tv1.tv_usec - tv0.tv_usec);
                     fclose(arquivo);
                     return 0;
             }

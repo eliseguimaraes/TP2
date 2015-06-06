@@ -201,9 +201,9 @@ int main(int argc, char**argv) {
                             buffer[n]=0;
                             checkResult = checksum(buffer);
                             serialize(pkt,seqNumber,checkResult,buffer);
-                            n = tp_sendto(s, pkt, strlen(pkt),&cliaddr); //envia o pacote
-                            while (n==-1) { //reenvia em caso de erro
-                                n = tp_sendto(s, pkt, strlen(pkt),&cliaddr);
+                            n = tp_sendto(s, pkt, 8+strlen(buffer),&cliaddr); //envia o pacote
+                            while (n<8) { //reenvia em caso de erro
+                                n = tp_sendto(s, pkt, 8+strlen(buffer),&cliaddr);
                             }
                             windowInsert(buffer, pkt, seqNumber); //buferiza o que acabou de enviar
                             fprintf(stderr,"\nPacote %d, conteúdo '%s', enviado e buferizado!\n", seqNumber,buffer);
