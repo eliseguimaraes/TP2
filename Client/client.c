@@ -1,4 +1,5 @@
-#include <sys/socket.h>
+#include "tp_socket.h"
+#include "tp_socket.c"
 #include <netinet/in.h>
 #include <stdio.h>
 #include <string.h>
@@ -19,7 +20,6 @@ struct windowPos {
 int s;
 unsigned int tam_buffer, tam_janela, tam_pkt, windowRoom;
 unsigned int maxSeqNo, lastRcvd;
-struct sockaddr_in6 cliaddr;
 unsigned int windowIn, windowOut;
 struct windowPos *window;
 
@@ -129,12 +129,16 @@ int removeRcvds (void) {
 }
 
 int main(int argc, char**argv) {
-    int n,ret, byte_count;
+    int n,ret,i;
     unsigned int nextSeq, checkResult, seqNumber;
-    struct addrinfo hints, *res = NULL;
+    unsigned long buffer_total = 0,byte_count;
+    so_addr servaddr;
     struct timeval tv0, tv1;
-    char *buffer, *pkt, ack[8], conv[4];
+    char *buffer, *pkt, ack[8],*fileName;
     FILE* arquivo;
+
+    if (tp_init())//erro
+        exit(1);
 
     if (argc != 6) {
         fprintf(stderr,"Argumentos necessarios: host_servidor, porto_servidor, nome_arquivo, tam_buffer, tam_janela.\n");
@@ -152,28 +156,27 @@ int main(int argc, char**argv) {
 
     gettimeofday(&tv0,0); //inicia a contagem de tempo
 
-    bzero(&hints, sizeof(hints)); //limpa a variável
-
-
-    hints.ai_family = PF_UNSPEC; //tipo do endereço não especificado
-    hints.ai_flags = AI_NUMERICHOST;
-
-    ret = getaddrinfo(argv[1], argv[2], &hints, &res);
+    ret = tp_build_addr(&servaddr,argv[1],atoi(argv[2]));
 
     if(ret) {
         fprintf(stderr,"Endereço inválido.\n");
         exit(1);
     }
 
-    s = socket(res->ai_family,SOCK_DGRAM,0); //cria um socket UDP
+    s = socket(PF_INET,SOCK_DGRAM,0); //cria um socket UDP
     puts("socket criado\n");
-
-    n = sendto(s,argv[3], strlen(argv[3]),0,res->ai_addr,res->ai_addrlen); //envia o nome do arquivo
+    fileName = (char*)malloc(strlen(argv[3]+1));
+    //detecção de erro (rudimentar) para nome do arquivo
+    fileName[0] = 0;
+    for (i=0; argv[3][i]!='\0'; i++) fileName[0] = (fileName[0]+argv[3][i])%255;
+    fileName[1] = '\0';
+    strcat(fileName,argv[3]);
+    n = tp_sendto(s,fileName, strlen(fileName),&servaddr); //envia o nome do arquivo
     fprintf(stderr,"\nNome de arquivo enviado: %s\n",argv[3]);
 
     while (n==-1) {
         fprintf(stderr,"Erro ao enviar mensagem.\n");
-        n = sendto(s,argv[3], strlen(argv[3]),0,res->ai_addr,res->ai_addrlen);
+        n = tp_sendto(s,argv[3], strlen(argv[3]),&servaddr);
     }
 
     //abre o arquivo que vai ser gravado
@@ -187,13 +190,14 @@ int main(int argc, char**argv) {
     windowInit();
     while (1) {
         if (windowRoom) {
-            n = recvfrom(s,pkt,tam_pkt,0,NULL,NULL);
+            n = tp_recvfrom(s,pkt,tam_pkt,NULL);
             while (n<0) {
-                n = recvfrom(s,pkt,tam_pkt,0,NULL,NULL);
+                n = tp_recvfrom(s,pkt,tam_pkt,NULL);
             }
             pkt[n] = 0;
             deserialize(pkt, &seqNumber,&checkResult,buffer, n);
             //detecta erros
+	        buffer_total += strlen(buffer);
             if(checkResult != checksum(buffer)) {
                 puts("Erro detectado");
                 continue; //se detectou erro, salta para a próxima iteração
@@ -208,9 +212,9 @@ int main(int argc, char**argv) {
 
                     gettimeofday(&tv1,0); //finaliza a contagem de tempo
                     long total = (tv1.tv_sec - tv0.tv_sec)*1000000 + tv1.tv_usec - tv0.tv_usec; //tempo decorrido, em microssegundos
-                    fprintf(stderr,"\nBuffer: \%5lu byte(s) \%10.2f kbps ( \%lu bytes em \%3u.\%06lu s)", (byte_count*1000000)/(1000*total), byte_count, tv1.tv_sec - tv0.tv_sec, tv1.tv_usec - tv0.tv_usec);
+                    fprintf(stderr,"\nTamanho do arquivo: \%5lu bytes Tamanho do buffer: \%5lu byte(s) \%10.2f kbps ( \%lu bytes em \%3u.\%06lu s)\n", buffer_total,tam_buffer,(double)(byte_count*1000000)/(double)(1000*total), byte_count, (unsigned int)(tv1.tv_sec - tv0.tv_sec), tv1.tv_usec - tv0.tv_usec);
                     arquivo = fopen("resultados.txt","a"); //abre o arquivo para salvar os dados
-                    fprintf(arquivo, "\nBuffer: \%5u byte(s) \%10.2f kbps ( \%u bytes em \%3u.\%06u s)", (byte_count*1000000)/(1000*total), byte_count, tv1.tv_sec - tv0.tv_sec, tv1.tv_usec - tv0.tv_usec);
+                    fprintf(arquivo,"\nTamanho do arquivo: \%5lu bytes Tamanho do buffer: \%5lu byte(s) \%10.2f kbps ( \%lu bytes em \%3u.\%06lu s)", buffer_total,tam_buffer,(double)(byte_count*1000000)/(double)(1000*total), byte_count, (unsigned int)(tv1.tv_sec - tv0.tv_sec), tv1.tv_usec - tv0.tv_usec);
                     fclose(arquivo);
                     return 0;
             }
@@ -231,10 +235,10 @@ int main(int argc, char**argv) {
         //envia ack do último recebido em ordem
         if (lastRcvd >= 0) {
             serializeAck(ack,lastRcvd); //cria o pacote do ack
-            n = sendto(s,ack,8,0,res->ai_addr,res->ai_addrlen); //envia o nome do arquivo
+            n = tp_sendto(s,ack,8,&servaddr); //envia o nome do arquivo
             while (n==-1) {
                 fprintf(stderr,"Erro ao enviar ack.\n");
-                n = sendto(s,ack,8,0,res->ai_addr,res->ai_addrlen);
+                n = tp_sendto(s,ack,8,&servaddr);
             }
             fprintf(stderr,"Ack %d enviado!",lastRcvd,n);
         }

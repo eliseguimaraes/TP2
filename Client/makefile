@@ -1,8 +1,8 @@
 IP = 127.0.0.1
 PORT = 32000
-FILE = arquivo.txt
-BUFFER = 9
-JANELA = 3
+FILE = rfc-index.txt
+BUFFER = 100
+JANELA = 10
 CC = gcc
 
 server:

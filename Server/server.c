@@ -1,4 +1,5 @@
-#include <sys/socket.h>
+#include "tp_socket.h"
+#include "tp_socket.c"
 #include <netinet/in.h>
 #include <stdio.h>
 #include <string.h>
@@ -86,10 +87,10 @@ void acknowledge (unsigned int seqNumber) { //número do ack representa que todo
     }
 }
 
-void resendAll (struct sockaddr_in6 *cliaddr) {
+void resendAll (so_addr *cliaddr) {
     unsigned int i = windowOut;
     while (i!=windowIn) {
-        sendto(s, window[i].pkt, strlen(window[i].pkt),0, (struct sockaddr *)cliaddr,sizeof(cliaddr));
+        tp_sendto(s, window[i].pkt, strlen(window[i].pkt), cliaddr);
         fprintf(stderr,"\nPacote %u reenviado\n",window[i].seqNumber);
         i = mod((i+1),tam_janela);
     }
@@ -133,16 +134,18 @@ void deserializeAck (unsigned char *ack, unsigned int *ackNumber, unsigned char 
 }
 
 int main(int argc, char**argv) {
-    int ret, len, fim,ack,flag, timeout,n;
+    int ret, len, fim,ack,flag, timeout,n,i;
     unsigned int checkResult, byte_count;
     struct addrinfo hints, *res;
     struct timeval tv0, tv1,tv;
-    struct sockaddr_in6 cliaddr;
+    so_addr cliaddr;
     unsigned int seqNumber, ackNumber;
-    char received[256], *pkt, aux[4];
+    char received[256], *pkt, aux[4], check = 0;
     char *buffer;
     FILE *arquivo;
     pid_t child;
+
+    if(tp_init()) exit(1);
 
     if (argc != 4) {
         printf("Argumentos necessarios: porto_servidor, tam_buffer, tam_janela.\n");
@@ -160,42 +163,30 @@ int main(int argc, char**argv) {
 
     //criação do socket UDP
 
-    hints.ai_flags = AI_PASSIVE;
-    hints.ai_family = AF_INET6;
-    hints.ai_socktype = SOCK_DGRAM;
-    hints.ai_protocol = 0;
-
-    ret = getaddrinfo(NULL,argv[1],&hints,&res);
-    if(ret) {
-        printf("Endereço inválido.");
-        exit(1);
-    }
-
-    s=socket(res->ai_family,SOCK_DGRAM,0);
+    s=tp_socket(atoi(argv[1]));
     puts("socket criado.\n");
     //setando o timeout no socket
     tv.tv_sec = TIMEOUT_S;
     tv.tv_usec = TIMEOUT_MS;
-    if (setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, &tv,sizeof(tv))<0) {
+    if (setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, &tv,sizeof(tv))<0)
         perror("Error");
-    }
 
-    bind(s,res->ai_addr,res->ai_addrlen);
-    puts("bind\n");
-
-
-    while (1) {
+    //while (1) {
         len=sizeof(cliaddr);
         //if ((child = fork())==0) { //caso seja processo filho
         //    close(s);
             gettimeofday(&tv0,0);//inicia a contagem de tempo
-            n = recvfrom(s,received,sizeof(received),0,(struct sockaddr *)&cliaddr, &len);
+            n = tp_recvfrom(s,received,sizeof(received),&cliaddr);
             while (n < 0) {
-                n = recvfrom(s,received,sizeof(received),0,(struct sockaddr *)&cliaddr, &len);
+                n = tp_recvfrom(s,received,sizeof(received),&cliaddr);
             }
             received[n] = 0;
-            puts(received);
-            arquivo = fopen(received, "r");
+            for (i=1; i<n; i++) check+=received[i];
+            if (check!=received[0]) {
+                puts("Erro no nome do arquivo");
+                exit(1);
+            }
+            arquivo = fopen(received+1, "r");
             if (arquivo == NULL) {
                 printf("Erro ao abrir o arquivo.");
                 exit(1);
@@ -210,9 +201,9 @@ int main(int argc, char**argv) {
                             buffer[n]=0;
                             checkResult = checksum(buffer);
                             serialize(pkt,seqNumber,checkResult,buffer);
-                            n = sendto(s, pkt, strlen(pkt),0, (struct sockaddr *)&cliaddr,sizeof(cliaddr)); //envia o pacote
+                            n = tp_sendto(s, pkt, strlen(pkt),&cliaddr); //envia o pacote
                             while (n==-1) { //reenvia em caso de erro
-                                n = sendto(s, pkt, strlen(pkt),0, (struct sockaddr *)&cliaddr,sizeof(cliaddr));
+                                n = tp_sendto(s, pkt, strlen(pkt),&cliaddr);
                             }
                             windowInsert(buffer, pkt, seqNumber); //buferiza o que acabou de enviar
                             fprintf(stderr,"\nPacote %d, conteúdo '%s', enviado e buferizado!\n", seqNumber,buffer);
@@ -232,7 +223,7 @@ int main(int argc, char**argv) {
                     ack = 0;
                     timeout = 0;
                     while(!ack&&!timeout) {
-                        n = recvfrom(s,received,4+sizeof(int),0,(struct sockaddr *)&cliaddr, &len); //recebe potenciais acks
+                        n = tp_recvfrom(s,received,4+sizeof(int),&cliaddr); //recebe potenciais acks
                         if(n<=0) { //erro
                             puts("erro");
                             if (errno == EAGAIN || errno == EWOULDBLOCK) {//timeout
@@ -273,7 +264,7 @@ int main(int argc, char**argv) {
             long total = (tv1.tv_sec - tv0.tv_sec)*1000000 + tv1.tv_usec - tv0.tv_usec; //tempo decorrido, em microssegundos
             printf("\nDesempenho: \nBytes enviados: %d \nTempo decorrido (microssegundos): %ld\nThroughput: %f bytes/segundo\n", byte_count, total, (float)byte_count*1000000/total);
     //    }
-    }
+    //}
 
     return 0;
 }
