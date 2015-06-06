@@ -1,28 +1,26 @@
 Server:
 loop:
-Verifica se há espaço para novos envios na janela: windowFull
-Lê buffer do arquivo
-Calcula hash de detecção de erro.
-Cria cabeçalho UDP de 64 bits: hash (32) + número de sequência (32)
-Envia cabeçalho + buffer
-Bufferiza tudo para funcionamento da janela: windowInsert
-Inicializa temporizador de 1s.
-Incrementa o número de sequência.
-Incrementa a contagem de bytes.
-Recebe possíveis acks (64 bits), com um timeout de 1s.
-Aplica acks: acknowledge
-Desliza a janela, se preciso: removeAckds.
-Reenvia os não confirmados.
+Verifica se há espaço para novos envios na janela através da função windowFull().
+Lê um buffer do arquivo com fread.
+Calcula checksum de detecção de erro.
+Cria cabeçalho UDP de 64 bits: checksum (32) + número de sequência (32)
+Envia o pacote composto do cabeçalho e do buffer.
+Armazena tudo no buffer associado à janela com a função windowInsert.
+Incrementa o número de sequência, que indica o próximo pacote a ser enviado.
+Incrementa a contagem de bytes para posterior medição.
+Recebe possíveis acks (64 bits), com um timeout de 1s. Caso o timeout se exceda, reenvia todos os pacotes não confirmados.
+Indica, no array de structs que representa o buffer associado à janela, os pacotes que foram confirmados.
+Desliza a janela, se preciso, com a função removeAckds, que remove o pacote da saída da janela caso este já tenha sido confirmado.
 fim do loop.
 
 Client:
-Guarda espaço na janela para elementos com SeqNumber de 0 a tam_janela - 1: windowReserve
+Guarda espaço no buffer associado à janela janela para elementos com SeqNumber de 0 a tam_janela - 1: windowReserve
 loop:
 Recebe pacote do server.
-Lê pacote e salva o que recebeu em hash_no, SeqNumber e buffer.
-Faz detecção de erro.
+Lê pacote e salva o que recebeu em checkResult, SeqNumber e buffer.
+Faz detecção de erro com checksum.
 Buferiza pacotes recebidos corretamente.
-Atualiza janela e lastRcvd (último pacote recebido na ordem correta).
-Desliza janela, se possível: removeRcvds e windowReserve.
+Atualiza janela, indicando o que foi recebido, e lastRcvd (último pacote recebido na ordem correta).
+Desliza janela, se possível: removeRcvds - remove da janela os pacotes já recebidos em ordem - e windowReserve - reserva espaço para novos pacotes.
 Envia Ack com número de lastRcvd.
 fim do loop
