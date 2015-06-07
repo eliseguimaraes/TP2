@@ -34,7 +34,7 @@ unsigned int checksum (char *str) {
     unsigned int i;
     unsigned int checkResult = 0;
     for (i=0; str[i]!='\0'; i++)
-        checkResult += (unsigned int)str[i];
+        checkResult = (checkResult + (unsigned int)str[i])%65535;
     return checkResult;
 }
 
