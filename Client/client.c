@@ -99,18 +99,26 @@ void windowInit ()  { //inicializa a janela
     windowIn = 0;
     windowOut = 0;
     unsigned int i;
-    for (i=0; i<tam_janela; i++)
+    for (i=0; i<tam_janela; i++) {
         windowReserve(i);
-
+        window[i].buffer = (char*)malloc(tam_buffer);
+        window[i].pkt = (char*)malloc(tam_pkt);
+    }
     windowRoom = tam_janela;
+}
+
+void windowEnd () {
+    unsigned int i;
+    for (i=0; i<tam_janela; i++) {
+        free(window[i].buffer);
+        free(window[i].pkt);
+    }
 }
 
 void windowStore (char *buffer, char *pkt, unsigned int seqNumber) {
         int num;
         num = mod((seqNumber - window[windowOut].seqNumber),maxSeqNo);
         if (num < tam_janela) {
-            window[windowOut+num].buffer = (char*)malloc(tam_buffer);
-            window[windowOut+num].pkt = (char*)malloc(tam_pkt);
             strcpy(window[windowOut + num].buffer,buffer);
             strcpy(window[windowOut + num].pkt,pkt);
             window[windowOut + num].Rcvd = 1;
@@ -119,8 +127,6 @@ void windowStore (char *buffer, char *pkt, unsigned int seqNumber) {
 }
 int removeRcvds (void) {
     if (window[windowOut].Rcvd) {
-        free(window[windowOut].buffer);
-        free(window[windowOut].pkt);
         lastRcvd = window[windowOut].seqNumber;
         windowOut = mod((windowOut + 1),tam_janela);
         return 1;
@@ -206,6 +212,7 @@ int main(int argc, char**argv) {
             if (!strcmp(buffer, "fim")) {
                 puts("Fim do arquivo");
                     fclose(arquivo);
+                    windowEnd();
                     free(buffer);
                     free(pkt);
                     free(window);
@@ -243,5 +250,11 @@ int main(int argc, char**argv) {
             fprintf(stderr,"Ack %d enviado!",lastRcvd,n);
         }
     }
+    fclose(arquivo);
+    windowEnd();
+    free(buffer);
+    free(pkt);
+    free(window);
+    close(s); //encerra a conexão
     return 0;
 }

@@ -39,7 +39,12 @@ unsigned int checksum (char *str) {
 }
 
 void windowInit(void) {
+    unsigned int i;
     windowIn = windowOut = 0;
+    for (i=0; i<tam_janela; i++) {
+        window[i].buffer = (char*)malloc(tam_buffer);
+        window[i].pkt = (char*)malloc(tam_pkt);
+    }
 }
 
 int windowFull(void) {
@@ -57,8 +62,6 @@ int windowEmpty (void) {
 }
 
 void windowInsert (char *buffer, char* pkt, unsigned int seqNumber) {
-    window[windowIn].buffer = (char*)malloc(tam_buffer);
-    window[windowIn].pkt = (char*)malloc(tam_pkt);
     window[windowIn].seqNumber = seqNumber;
     window[windowIn].AckRcvd = 0;
     strcpy(window[windowIn].buffer, buffer);
@@ -68,8 +71,6 @@ void windowInsert (char *buffer, char* pkt, unsigned int seqNumber) {
 
 int removeAckds (void) {
     if (window[windowOut].AckRcvd) {
-        free(window[windowOut].buffer);
-        free(window[windowOut].pkt);
         window[windowOut].AckRcvd = 0;
         fprintf(stderr,"\nPacote %d confirmado e removido do buffer.\n",window[windowOut].seqNumber);
         windowOut = mod((windowOut + 1),tam_janela);
@@ -130,6 +131,14 @@ void deserializeAck (unsigned char *ack, unsigned int *ackNumber, unsigned char 
         a--;
         buffer[i-4] = ack[i];
         i++;
+    }
+}
+
+void windowEnd () {
+    unsigned int i;
+    for (i=0; i<tam_janela; i++) {
+        free(window[i].buffer);
+        free(window[i].pkt);
     }
 }
 
@@ -263,6 +272,10 @@ int main(int argc, char**argv) {
             gettimeofday(&tv1,0);//encera a contagem de tempo
             long total = (tv1.tv_sec - tv0.tv_sec)*1000000 + tv1.tv_usec - tv0.tv_usec; //tempo decorrido, em microssegundos
             printf("\nDesempenho: \nBytes enviados: %d \nTempo decorrido (microssegundos): %ld\nThroughput: %f bytes/segundo\n", byte_count, total, (float)byte_count*1000000/total);
+            windowEnd();
+            free(window);
+            free(buffer);
+            free(pkt);
     //    }
     //}
 

@@ -1,6 +1,6 @@
 PORT = 32000
-BUFFER = 558
-JANELA = 4
+BUFFER = 500
+JANELA = 128
 CC = gcc
 
 server:
